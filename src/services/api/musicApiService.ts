@@ -1,8 +1,7 @@
 import { Track, Playlist, Artist } from '../../types/models';
 
-// Configurable production backend URL
-// When you deploy your backend to Vercel, replace this with your Vercel domain (e.g., https://musify-api.vercel.app)
-export const DEDICATED_BACKEND_URL: string = '';
+// Dedicated production Vercel backend
+export const DEDICATED_BACKEND_URL: string = 'https://musifynative-server.vercel.app';
 
 const SAAVN_BASE = 'https://saavn.bycomsolutions.com/api';
 const SAAVN_FALLBACK = 'https://saavn.me/api';
