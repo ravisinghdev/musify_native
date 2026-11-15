@@ -1,5 +1,5 @@
 import { YouTubeMusicProvider } from "./youtube.provider";
-import { dbService, sanitizeText, type TrackData } from "./db.service";
+import type { TrackData } from "./music.types";
 
 interface AISuggestion {
   title: string;
@@ -13,6 +13,10 @@ interface AIPlaylistResponse {
   tracks: AISuggestion[];
 }
 
+function sanitizeText(text: string, maxLen = 200): string {
+  return (text || "").replace(/[<>]/g, "").slice(0, maxLen).trim();
+}
+
 export class AIService {
   private apiKey: string;
   private provider: YouTubeMusicProvider;
@@ -23,9 +27,9 @@ export class AIService {
   }
 
   /**
-   * Generates a context-aware smart playlist using Gemini 3.6 Flash,
-   * searches and validates playable YouTube tracks for each recommendation,
-   * and saves it directly to the user's database.
+   * Generates a context-aware smart playlist using Gemini,
+   * searches and validates playable YouTube tracks for each recommendation.
+   * Returns playlist data directly in memory (stateless).
    */
   async generatePlaylist(
     userId: string,
@@ -77,7 +81,7 @@ Always return pure JSON matching this exact structure:
         };
 
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${this.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -108,20 +112,10 @@ Always return pure JSON matching this exact structure:
       const fallbackTracks = await this.provider.searchTracks(cleanPrompt);
       const playlistName = `Mix: ${cleanPrompt.slice(0, 30)}`;
       const playlistDesc = `A curated vibe tailored for "${cleanPrompt}".`;
-
       const tracksToUse = (fallbackTracks.tracks || []).slice(0, maxCount);
-      const created = await dbService.createPlaylist(
-        userId,
-        playlistName,
-        playlistDesc,
-      );
-
-      for (const track of tracksToUse) {
-        await dbService.addTrackToPlaylist(userId, created.id, track);
-      }
 
       return {
-        playlistId: created.id,
+        playlistId: `ai_${Date.now()}`,
         playlistName,
         description: playlistDesc,
         tracks: tracksToUse,
@@ -143,7 +137,6 @@ Always return pure JSON matching this exact structure:
       .slice(0, maxCount)
       .filter((t) => !!t.title);
 
-    // Parallel search queries for high responsiveness
     const searchPromises = targetSuggestions.map(async (item) => {
       const query = `${item.title} ${item.artist || ""}`.trim();
       try {
@@ -169,7 +162,6 @@ Always return pure JSON matching this exact structure:
       }
     }
 
-    // If verified tracks is empty, fallback to searching the main prompt
     if (verifiedTracks.length === 0) {
       const searchRes = await this.provider.searchTracks(cleanPrompt);
       for (const t of (searchRes.tracks || []).slice(0, maxCount)) {
@@ -177,18 +169,8 @@ Always return pure JSON matching this exact structure:
       }
     }
 
-    // Save newly generated AI playlist to Supabase DB for this user
-    const created = await dbService.createPlaylist(
-      userId,
-      playlistName,
-      playlistDesc,
-    );
-    for (const track of verifiedTracks) {
-      await dbService.addTrackToPlaylist(userId, created.id, track);
-    }
-
     return {
-      playlistId: created.id,
+      playlistId: `ai_${Date.now()}`,
       playlistName,
       description: playlistDesc,
       tracks: verifiedTracks,
@@ -196,7 +178,7 @@ Always return pure JSON matching this exact structure:
   }
 
   /**
-   * Generates intelligent next-song suggestions and seamless queue transitions using Gemini 3.6 Flash.
+   * Generates intelligent next-song suggestions and seamless queue transitions using Gemini.
    */
   async getAISmartQueueSuggestions(
     currentTrack: TrackData,
@@ -253,7 +235,7 @@ Return pure JSON with this exact schema:
 }`;
 
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${this.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -286,7 +268,6 @@ Return pure JSON with this exact schema:
       }
     }
 
-    // Resolve AI suggestions to playable YouTube Music tracks
     const resolvedResults: Array<{
       track: TrackData;
       reason: string;
@@ -327,7 +308,6 @@ Return pure JSON with this exact schema:
       }
     }
 
-    // Fallback: If AI returned fewer results, populate with algorithmic YouTube upNext & artist radio
     if (resolvedResults.length < maxCount) {
       try {
         const cleanId = (currentTrack.sourceTrackId || currentTrack.id).replace(
