@@ -18,6 +18,9 @@ import {
   Play,
   Pause,
   Settings,
+  X,
+  Music2,
+  TrendingUp,
 } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
 import { AppShell } from '../../components/layout/AppShell';
@@ -38,6 +41,7 @@ export const SearchScreen: React.FC = () => {
   const [results, setResults] = useState<Track[]>([]);
   const [dailyMix, setDailyMix] = useState<Track[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isFocused, setIsFocused] = useState(false);
   const debounceTimer = useRef<any>(null);
 
   useEffect(() => {
@@ -137,8 +141,22 @@ export const SearchScreen: React.FC = () => {
             placeholderTextColor="rgba(255, 255, 255, 0.45)"
             value={query}
             onChangeText={setQuery}
+            onFocus={() => setIsFocused(true)}
             style={styles.searchInput}
           />
+
+          {query.length > 0 && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                setQuery('');
+                setSuggestions([]);
+              }}
+              style={{ padding: 6, marginRight: 4 }}
+            >
+              <X size={16} color="rgba(255, 255, 255, 0.6)" />
+            </TouchableOpacity>
+          )}
 
           {/* AI Mode Capsule Toggle Button */}
           <TouchableOpacity
@@ -161,36 +179,95 @@ export const SearchScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Autocomplete Suggestions from YouTube */}
-        {!isAIMode && suggestions.length > 0 && query.trim().length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, paddingBottom: 14 }}
+        {/* Rich Autocomplete & Song Suggestions Dropdown Card */}
+        {!isAIMode && suggestions.length > 0 && query.trim().length > 0 && isFocused && (
+          <View
+            style={{
+              marginBottom: 16,
+              borderRadius: 20,
+              overflow: 'hidden',
+              backgroundColor: 'rgba(12, 14, 20, 0.88)',
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.14)',
+              paddingVertical: 6,
+            }}
           >
-            {suggestions.slice(0, 8).map((sugg, idx) => (
+            <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+            <View
+              style={{
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TrendingUp size={13} color={colors.primary} />
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: '700',
+                    color: 'rgba(255, 255, 255, 0.6)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.8,
+                  }}
+                >
+                  Suggestions
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsFocused(false)}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.primary }}>
+                  Done
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {suggestions.slice(0, 6).map((sugg, idx) => (
               <TouchableOpacity
                 key={`sugg-${idx}`}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
                 onPress={() => {
                   hapticFeedback.light();
                   setQuery(sugg);
+                  setIsFocused(false);
                 }}
                 style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 14,
-                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                  borderWidth: 1,
-                  borderColor: 'rgba(255, 255, 255, 0.12)',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingVertical: 11,
+                  borderTopWidth: idx > 0 ? 1 : 0,
+                  borderTopColor: 'rgba(255, 255, 255, 0.05)',
+                  gap: 12,
                 }}
               >
-                <Text style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.85)', fontWeight: '600' }}>
+                <View
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Search size={14} color="rgba(255, 255, 255, 0.65)" />
+                </View>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontSize: 14,
+                    color: '#FFFFFF',
+                    fontWeight: '500',
+                  }}
+                  numberOfLines={1}
+                >
                   {sugg}
                 </Text>
               </TouchableOpacity>
             ))}
-          </ScrollView>
+          </View>
         )}
 
         {/* AI Suggested Prompt Capsules (Visible when in AI Mode or when query is empty) */}
