@@ -5,7 +5,9 @@ import { YouTubeMusicProvider } from "./modules/youtube.provider";
 import { AIService } from "./modules/ai.service";
 import { memoryCache } from "./modules/cache.service";
 import { roomService } from "./modules/room.service";
-import type { TrackData } from "./modules/music.types";
+import type { Track } from "./modules/music.types";
+
+export type TrackData = Track;
 
 const provider = new YouTubeMusicProvider();
 const aiService = new AIService(provider);

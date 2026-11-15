@@ -1,5 +1,7 @@
 import { YouTubeMusicProvider } from "./youtube.provider";
-import type { TrackData } from "./music.types";
+import type { Track } from "./music.types";
+
+export type TrackData = Track;
 
 interface AISuggestion {
   title: string;
