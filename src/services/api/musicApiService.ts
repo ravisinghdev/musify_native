@@ -1,14 +1,12 @@
 import { Track, Playlist, Artist } from '../../types/models';
 import { decodeHtmlEntities } from '../../utils/textUtils';
 import { youtubeService } from '../youtube/youtubeService';
+import { spotifyService } from '../spotify/spotifyService';
 
 // Dedicated production backends
 export const RENDER_BACKEND_URL: string = 'https://musify-native.onrender.com';
 export const DEDICATED_BACKEND_URL: string = 'https://musify-native.onrender.com';
 
-const SAAVN_BASE = 'https://saavn.dev/api';
-const SAAVN_FALLBACK = 'https://saavn.me/api';
-const SAAVN_MIRROR3 = 'https://saavn.bycomsolutions.com/api';
 const AUDIUS_BASE = 'https://api.audius.co/v1';
 const ITUNES_BASE = 'https://itunes.apple.com';
 
@@ -35,10 +33,9 @@ class MusicApiService {
 
   /**
    * Search songs with intelligent high-accuracy catalog priority:
-   * 1. JioSaavn Live Catalog (Accurate official release titles, artist metadata & 320kbps CDNs)
-   * 2. Artist-augmented queries for specific tracks
+   * 1. Spotify Unofficial Catalog (Exact official release titles, artist metadata & unadulterated album artwork)
+   * 2. Client-Side YouTube InnerTube Search (Direct official videos & audio)
    * 3. Audius global catalog
-   * 4. Render API only as targeted stream / video resolver (not noisy raw search)
    */
   async searchTracks(query: string): Promise<Track[]> {
     const trimmed = query.trim();
@@ -49,7 +46,37 @@ class MusicApiService {
       return this.searchCache.get(key)!;
     }
 
-    // 1. Direct Render YouTube search as primary source
+    // 1. Spotify Unofficial Catalog Search (Accurate pure metadata & album art)
+    try {
+      const spotifyTracks = await spotifyService.searchTracks(trimmed, 25);
+      if (Array.isArray(spotifyTracks) && spotifyTracks.length > 0) {
+        this.searchCache.set(key, spotifyTracks);
+        return spotifyTracks;
+      }
+    } catch (e) {
+      console.warn('Spotify catalog search error, falling back:', e);
+    }
+
+    // 2. Client-Side YouTube InnerTube Search
+    try {
+      const ytTracks = await youtubeService.searchTracks(trimmed);
+      if (Array.isArray(ytTracks) && ytTracks.length > 0) {
+        // Prioritize exact original tracks over remixes / relights
+        const sortedYt = [...ytTracks].sort((a, b) => {
+          const aRemix = /remix|relight|mashup/i.test(a.title);
+          const bRemix = /remix|relight|mashup/i.test(b.title);
+          if (aRemix && !bRemix) return 1;
+          if (!aRemix && bRemix) return -1;
+          return 0;
+        });
+        this.searchCache.set(key, sortedYt);
+        return sortedYt;
+      }
+    } catch (e) {
+      console.warn('Client-side YouTube search failed, falling back:', e);
+    }
+
+    // 3. Direct Render YouTube search fallback
     if (RENDER_BACKEND_URL) {
       try {
         const res = await this.fetchWithTimeout(
@@ -72,129 +99,7 @@ class MusicApiService {
       }
     }
 
-    const promises: Promise<Track[]>[] = [];
-
-    // Source 2: JioSaavn Live Direct Search (Exact metadata, 320kbps/160kbps official CDNs)
-    promises.push(
-      (async () => {
-        try {
-          let res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=${encodeURIComponent(trimmed)}&limit=25`, 3500);
-          if (!res.ok) {
-            res = await this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=${encodeURIComponent(trimmed)}&limit=25`, 3500);
-          }
-          if (res.ok) {
-            const json = await res.json();
-            const results = json.data?.results || [];
-            if (Array.isArray(results) && results.length > 0) {
-              return results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
-            }
-          }
-        } catch {
-          // ignore
-        }
-        return [];
-      })()
-    );
-
-    // Source 2: Artist-augmented Query (e.g. for "Alfaaz", also query "Alfaaz Hamza Malik" to surface the exact original)
-    if (!trimmed.includes(' ') && trimmed.length >= 3) {
-      promises.push(
-        (async () => {
-          try {
-            const res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=${encodeURIComponent(trimmed + ' Hamza Malik')}&limit=10`, 3500);
-            if (res.ok) {
-              const json = await res.json();
-              const results = json.data?.results || [];
-              if (Array.isArray(results) && results.length > 0) {
-                return results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
-              }
-            }
-          } catch {
-            // ignore
-          }
-          return [];
-        })()
-      );
-    }
-
-    // Source 3: Audius Full Length Global Track Fallback
-    promises.push(
-      (async () => {
-        try {
-          const url = `${AUDIUS_BASE}/tracks/search?query=${encodeURIComponent(trimmed)}&app_name=musify_native`;
-          const res = await this.fetchWithTimeout(url, 3500);
-          if (res.ok) {
-            const json = await res.json();
-            const rawTracks: any[] = json.data || [];
-            return rawTracks.map((t) => this.formatAudiusTrack(t)).filter((t) => t && t.mediaUrl) as Track[];
-          }
-        } catch {
-          // ignore
-        }
-        return [];
-      })()
-    );
-
-    const settled = await Promise.allSettled(promises);
-    const saavnTracks = settled[0].status === 'fulfilled' ? settled[0].value : [];
-    const augmentedTracks = settled[1] && settled[1].status === 'fulfilled' ? settled[1].value : [];
-    const audiusTracks = settled[2] && settled[2].status === 'fulfilled' ? settled[2].value : [];
-
-    // Intelligently combine and rank exact matches
-    const combined: Track[] = [];
-    const seenSignatures = new Set<string>();
-
-    const addTrack = (t: Track) => {
-      if (!t.mediaUrl) return;
-      if (t.duration && t.duration < 45) return;
-      const sig = `${t.title.toLowerCase().trim()}_${(t.artist || '').toLowerCase().trim()}`;
-      if (!seenSignatures.has(sig)) {
-        seenSignatures.add(sig);
-        combined.push(t);
-      }
-    };
-
-    // Prioritize high-accuracy official catalog
-    saavnTracks.forEach(addTrack);
-    augmentedTracks.forEach(addTrack);
-    audiusTracks.forEach(addTrack);
-
-    if (combined.length > 0) {
-      this.searchCache.set(key, combined);
-      return combined;
-    }
-
-    // Fallback: If no direct results found, query Render backend as last resort fallback
-    if (RENDER_BACKEND_URL) {
-      try {
-        const res = await this.fetchWithTimeout(
-          `${RENDER_BACKEND_URL}/api/v1/search?query=${encodeURIComponent(trimmed)}&limit=15`,
-          4000
-        );
-        if (res.ok) {
-          const json = await res.json();
-          const results = json.tracks || json.data || json.results || [];
-          if (Array.isArray(results) && results.length > 0) {
-            const fallbackTracks = results
-              .map((item: any) => this.formatRenderTrack(item))
-              .filter(Boolean) as Track[];
-            if (fallbackTracks.length > 0) {
-              this.searchCache.set(key, fallbackTracks);
-              return fallbackTracks;
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (combined.length > 0) {
-      this.searchCache.set(key, combined);
-      return combined;
-    }
-
-    // Fallback: Audius Search (Full length tracks)
+    // 4. Audius Search Fallback
     try {
       const url = `${AUDIUS_BASE}/tracks/search?query=${encodeURIComponent(trimmed)}&app_name=musify_native`;
       const res = await this.fetchWithTimeout(url, 3500);
@@ -215,24 +120,50 @@ class MusicApiService {
   }
 
   /**
-   * Resolve direct playable stream URL for a track using Echo Music's High-Bitrate Dual Resolver:
-   * 1. If track already has a valid direct high-bitrate CDN URL (Saavn, iTunes, Audius), use it directly.
-   * 2. For YouTube / generic tracks, perform strict matching against JioSaavn 320kbps CDNs (Title + Artist + duration +/- 8s)
-   *    so the user gets an instant 320kbps crystal-clear stream without mashup mismatches.
-   * 3. Fallback to Render YouTube stream proxy.
+   * Resolve direct playable stream URL for a track using Client-Side YouTube Audio Extractor:
+   * 1. If track is from Spotify (starts with sp_ or has title+artist), resolve stream via YouTube video ID
+   * 2. If track has direct high-speed CDN audio (Audius / iTunes / preview), play directly.
+   * 3. Fallback to direct client-side YouTube extraction or Render stream proxy.
    */
   async resolvePlayableStream(track: Track): Promise<string> {
     if (!track) return '';
 
-    // Direct CDN tracks from Saavn or Audius (already verified 320kbps/160kbps stream)
-    if (track.mediaUrl && (track.mediaUrl.includes('saavncdn.com') || track.mediaUrl.includes('audius.co') || track.mediaUrl.includes('apple.com'))) {
+    // Direct CDN preview or Audius stream
+    if (track.mediaUrl && (track.mediaUrl.includes('audius.co') || track.mediaUrl.includes('apple.com'))) {
       return track.mediaUrl;
     }
 
     const cleanId = (track.id || '').replace(/^yt_/, '');
 
-    // 1. Direct Client-side InnerTube Audio Extraction (Echo Music primary player logic)
-    // Extracts authentic original stream straight from YouTube from the user's mobile IP without proxying or remix mismatches
+    // If it's a Spotify track (or missing direct stream), search YouTube directly for the exact original track
+    if (track.id?.startsWith('sp_') || !track.mediaUrl) {
+      try {
+        const cleanTitle = (track.title || '')
+          .replace(/\(.*?\)|\[.*?\]/g, '')
+          .replace(/official\s+video|lyric\s+video|audio|remix|mashup/gi, '')
+          .trim();
+        const artist = (track.artist || '').split(',')[0].trim();
+        const searchQuery = `${cleanTitle} ${artist}`.trim();
+
+        const ytMatches = await youtubeService.searchTracks(searchQuery);
+        if (Array.isArray(ytMatches) && ytMatches.length > 0) {
+          // Reject mashups/remixes when matching a non-remix track
+          const originalMatch = ytMatches.find((m) => {
+            const mTitle = (m.title || '').toLowerCase();
+            return !mTitle.includes('remix') && !mTitle.includes('mashup') && !mTitle.includes('relight');
+          }) || ytMatches[0];
+
+          if (originalMatch?.id) {
+            const stream = await youtubeService.getStreamUrl(originalMatch.id);
+            if (stream) return stream;
+          }
+        }
+      } catch (err) {
+        console.warn('Spotify to YouTube stream resolution error:', err);
+      }
+    }
+
+    // Direct Client-side InnerTube Audio Extraction
     if (cleanId && cleanId.length === 11) {
       try {
         const clientStream = await youtubeService.getStreamUrl(cleanId);
@@ -241,60 +172,6 @@ class MusicApiService {
         }
       } catch (err) {
         console.warn('Direct client-side YouTube stream extraction error:', err);
-      }
-    }
-
-    // 2. High-Fidelity Matcher: Check JioSaavn 320kbps CDN for an exact match (Title + Artist)
-    if (track.title && track.title !== 'Untitled Track') {
-      try {
-        const cleanTitle = track.title
-          .replace(/\(.*?\)|\[.*?\]/g, '')
-          .replace(/official\s+video|lyric\s+video|audio|remix|mashup/gi, '')
-          .trim();
-        const artist = track.artist && track.artist !== 'Various Artists' && track.artist !== 'Unknown Artist'
-          ? track.artist.split(',')[0].trim()
-          : '';
-        const query = `${cleanTitle} ${artist}`.trim();
-
-        const matchRes = await this.fetchWithTimeout(
-          `${SAAVN_MIRROR3}/search/songs?query=${encodeURIComponent(query)}&limit=5`,
-          3500
-        ).catch(() => this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=${encodeURIComponent(query)}&limit=5`, 3500));
-
-        if (matchRes.ok) {
-          const json = await matchRes.json();
-          const results = json.data?.results || [];
-          if (Array.isArray(results) && results.length > 0) {
-            // Find accurate match: duration close to YouTube duration or exact title match
-            const bestMatch = results.find((r: any) => {
-              const rTitle = (r.name || r.title || '').toLowerCase().trim();
-              const targetTitle = cleanTitle.toLowerCase();
-              if (rTitle.includes('mashup') || rTitle.includes('remix') || rTitle.includes('relight')) {
-                if (!targetTitle.includes('mashup') && !targetTitle.includes('remix') && !targetTitle.includes('relight')) {
-                  return false;
-                }
-              }
-              const isTitleClose = rTitle.includes(targetTitle) || targetTitle.includes(rTitle);
-              if (!isTitleClose) return false;
-              if (track.duration > 0 && r.duration) {
-                const diff = Math.abs(Number(r.duration) - track.duration);
-                return diff <= 12; // Within 12 seconds
-              }
-              return true;
-            });
-
-            if (bestMatch) {
-              const highQ = bestMatch.downloadUrl?.find((u: any) => u.quality === '320kbps' || u.quality === '160kbps')
-                || bestMatch.downloadUrl?.[bestMatch.downloadUrl.length - 1];
-              const cdnUrl = highQ?.url || highQ?.link || bestMatch.media_preview_url;
-              if (cdnUrl) {
-                return cdnUrl.startsWith('http://') ? cdnUrl.replace('http://', 'https://') : cdnUrl;
-              }
-            }
-          }
-        }
-      } catch {
-        // Fallback to Render proxy stream
       }
     }
 
@@ -331,24 +208,16 @@ class MusicApiService {
       return this.trendingTracksCache.slice(0, limit);
     }
 
-    // 1. JioSaavn Top Trending Songs (Accurate 320kbps CDNs)
+    // 1. Spotify Top Global & Regional Trending Hits
     try {
-      let res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
-      if (!res.ok) {
-        res = await this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
+      const spotifyHits = await spotifyService.searchTracks('Top Hits 2026', limit);
+      if (Array.isArray(spotifyHits) && spotifyHits.length > 0) {
+        this.trendingTracksCache = spotifyHits;
+        return spotifyHits.slice(0, limit);
       }
-      if (res.ok) {
-        const json = await res.json();
-        const results = json.data?.results || [];
-        if (Array.isArray(results) && results.length > 0) {
-          const tracks = results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
-          if (tracks.length > 0) {
-            this.trendingTracksCache = tracks;
-            return tracks.slice(0, limit);
-          }
-        }
-      }
-    } catch (e) {}
+    } catch (e) {
+      // ignore
+    }
 
     // 2. Render Backend Recommendations fallback
     if (RENDER_BACKEND_URL) {
@@ -370,45 +239,7 @@ class MusicApiService {
       }
     }
 
-    // 1. Dedicated HTTPS Backend (If configured with your Vercel URL)
-    if (DEDICATED_BACKEND_URL) {
-      try {
-        const res = await this.fetchWithTimeout(`${DEDICATED_BACKEND_URL}/api/trending`, 4000);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && Array.isArray(json.results) && json.results.length > 0) {
-            this.trendingTracksCache = json.results;
-            return json.results.slice(0, limit);
-          }
-        }
-      } catch (e) {
-        console.warn('Dedicated backend trending error, falling back to public mirrors:', e);
-      }
-    }
-
-    // 1. Try JioSaavn top trending songs (Full-length high fidelity)
-    try {
-      let res = await this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
-      if (!res.ok) {
-        res = await this.fetchWithTimeout(`${SAAVN_FALLBACK}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
-      }
-      if (!res.ok) {
-        res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
-      }
-      if (res.ok) {
-        const json = await res.json();
-        const results = json.data?.results || [];
-        if (Array.isArray(results) && results.length > 0) {
-          const tracks = results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
-          if (tracks.length > 0) {
-            this.trendingTracksCache = tracks;
-            return tracks.slice(0, limit);
-          }
-        }
-      }
-    } catch (e) {}
-
-    // 2. Try Audius trending (Full-length tracks)
+    // 3. Try Audius trending (Full-length tracks)
     try {
       const url = `${AUDIUS_BASE}/tracks/trending?app_name=musify_native`;
       const res = await this.fetchWithTimeout(url, 3500);
@@ -423,7 +254,7 @@ class MusicApiService {
       }
     } catch (e) {}
 
-    // 3. Fallback to iTunes India
+    // 4. Fallback to iTunes
     try {
       const url = `${ITUNES_BASE}/search?term=Top+Hindi+Songs&media=music&entity=song&country=in&limit=30`;
       const res = await this.fetchWithTimeout(url, 3500);
@@ -511,112 +342,6 @@ class MusicApiService {
   /**
    * Formatters
    */
-  private formatSaavnTrack(raw: any): Track | null {
-    if (!raw) return null;
-
-    // Pick best quality audio stream: 320kbps -> 160kbps -> 96kbps -> last
-    let streamUrl = '';
-    if (Array.isArray(raw.downloadUrl) && raw.downloadUrl.length > 0) {
-      const highQ = raw.downloadUrl.find((u: any) => u.quality === '320kbps' || u.quality === '160kbps') || raw.downloadUrl[raw.downloadUrl.length - 1];
-      streamUrl = highQ?.url || highQ?.link || '';
-    } else if (raw.media_preview_url) {
-      streamUrl = raw.media_preview_url;
-    }
-
-    if (!streamUrl) return null;
-
-    // Enforce HTTPS across all audio streams so modern Android (Android 14, 15, 16+)
-    // security policies never block or mute unencrypted cleartext HTTP media sockets!
-    if (streamUrl.startsWith('http://')) {
-      streamUrl = streamUrl.replace('http://', 'https://');
-    }
-
-    // Pick highest resolution uncompressed artwork: replace 50x50 / 150x150 with 500x500
-    let artwork = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=600&q=80';
-    if (Array.isArray(raw.image)) {
-      const bestImg = raw.image.find((i: any) => i.quality === '500x500') || raw.image[raw.image.length - 1];
-      artwork = bestImg?.url || bestImg?.link || artwork;
-    } else if (typeof raw.image === 'string') {
-      artwork = raw.image;
-    }
-
-    // Upgrade resolution on Saavn CDN URLs
-    if (artwork.includes('-150x150.jpg') || artwork.includes('-50x50.jpg')) {
-      artwork = artwork.replace('-150x150.jpg', '-500x500.jpg').replace('-50x50.jpg', '-500x500.jpg');
-    }
-
-    if (artwork.startsWith('http://')) {
-      artwork = artwork.replace('http://', 'https://');
-    }
-
-    // Artist name extraction with comprehensive multi-source parsing
-    let artistName = '';
-
-    // 1. Direct string fields
-    if (typeof raw.primaryArtists === 'string' && raw.primaryArtists.trim()) {
-      artistName = raw.primaryArtists.trim();
-    } else if (Array.isArray(raw.primaryArtists) && raw.primaryArtists.length > 0) {
-      artistName = raw.primaryArtists
-        .map((a: any) => (typeof a === 'string' ? a : a.name))
-        .filter(Boolean)
-        .join(', ');
-    }
-
-    // 2. Structured artists object (e.g. raw.artists.primary / raw.artists.all)
-    if (!artistName && raw.artists) {
-      if (Array.isArray(raw.artists.primary) && raw.artists.primary.length > 0) {
-        artistName = raw.artists.primary
-          .map((a: any) => (typeof a === 'string' ? a : a.name))
-          .filter(Boolean)
-          .join(', ');
-      } else if (Array.isArray(raw.artists.all) && raw.artists.all.length > 0) {
-        artistName = raw.artists.all
-          .map((a: any) => (typeof a === 'string' ? a : a.name))
-          .filter(Boolean)
-          .join(', ');
-      }
-    }
-
-    // 3. Fallbacks: singers, artist, more_info
-    if (!artistName && typeof raw.singers === 'string' && raw.singers.trim()) {
-      artistName = raw.singers.trim();
-    } else if (!artistName && typeof raw.artist === 'string' && raw.artist.trim()) {
-      artistName = raw.artist.trim();
-    } else if (!artistName && raw.more_info) {
-      if (Array.isArray(raw.more_info.artistMap?.primary_artists) && raw.more_info.artistMap.primary_artists.length > 0) {
-        artistName = raw.more_info.artistMap.primary_artists.map((a: any) => a.name).join(', ');
-      } else if (raw.more_info.singers) {
-        artistName = typeof raw.more_info.singers === 'string' ? raw.more_info.singers : raw.more_info.singers.join(', ');
-      }
-    }
-
-    if (!artistName) {
-      artistName = 'Various Artists';
-    }
-
-    // Video fallback derivation via Render backend for JioSaavn / local tracks
-    const fallbackRenderVideo = `${RENDER_BACKEND_URL}/api/v1/tracks/search-video?query=${encodeURIComponent(
-      (raw.name || raw.title || '') + ' ' + (artistName || '')
-    )}`;
-
-    return {
-      id: String(raw.id || raw.title),
-      title: decodeHtmlEntities(raw.name || raw.title || 'Untitled Track'),
-      artist: decodeHtmlEntities(artistName),
-      album: decodeHtmlEntities(typeof raw.album === 'object' ? raw.album?.name || 'Single' : raw.album || 'Single'),
-      artworkUrl: artwork,
-      mediaUrl: streamUrl,
-      lowQualityVideoUrl: `${fallbackRenderVideo}&quality=low`,
-      highQualityVideoUrl: `${fallbackRenderVideo}&quality=high`,
-      renderStreamUrl: fallbackRenderVideo,
-      duration: Number(raw.duration) || 210,
-      type: 'audio',
-      views: Number(raw.playCount) || 75000,
-      likes: Number(raw.favoriteCount) || 5400,
-      isLiked: false,
-    };
-  }
-
   private formatRenderTrack(raw: any): Track | null {
     if (!raw || !raw.title) return null;
 
