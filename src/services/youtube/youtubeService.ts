@@ -287,44 +287,115 @@ class YouTubeService {
   }
 
   /**
-   * Resolve high quality audio stream URL on-demand
+   * Resolve direct playable audio stream using Echo Music's exact client-side InnerTube logic:
+   * 1. Query YouTube InnerTube Android/iOS/Embedded Client directly from mobile device (Residential/Cellular IP)
+   * 2. Emergency fallback to fast Piped instances (kavin.rocks, piped.yt, leptons.xyz, adminforge.de)
+   * 3. Select clean Opus/AAC stream URL
    */
   async getStreamUrl(videoId: string): Promise<string> {
-    const cached = this.streamUrlCache.get(videoId);
+    const cleanId = videoId.replace(/^yt_/, '');
+    const cached = this.streamUrlCache.get(cleanId);
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
       return cached.url;
     }
 
-    for (let attempts = 0; attempts < 3; attempts++) {
+    // 1. Direct Client-side InnerTube Player API with Android VR & TVHTML5 Client (Bypasses n-decipher & bot blocks)
+    try {
+      const innertubePayloads = [
+        {
+          context: {
+            client: {
+              clientName: 'ANDROID_VR',
+              clientVersion: '1.65.10',
+              deviceMake: 'Oculus',
+              deviceModel: 'Quest 3',
+              osName: 'Android',
+              osVersion: '12L',
+              hl: 'en',
+              gl: 'US',
+            },
+          },
+          videoId: cleanId,
+        },
+        {
+          context: {
+            client: {
+              clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+              clientVersion: '2.0',
+              hl: 'en',
+              gl: 'US',
+            },
+            thirdParty: {
+              embedUrl: 'https://www.youtube.com',
+            },
+          },
+          videoId: cleanId,
+        },
+      ];
+
+      for (const payload of innertubePayloads) {
+        try {
+          const res = await fetch('https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 14) gzip',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const formats = data?.streamingData?.adaptiveFormats || [];
+            // Pick highest quality audio format (itag 251 Opus or itag 140 AAC)
+            const audioFormats = formats.filter((f: any) => f.mimeType?.startsWith('audio/') && f.url);
+            audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+
+            const bestUrl = audioFormats[0]?.url;
+            if (bestUrl) {
+              this.streamUrlCache.set(cleanId, { url: bestUrl, expiresAt: now + 5 * 3600 * 1000 });
+              return bestUrl;
+            }
+          }
+        } catch {
+          // try next client
+        }
+      }
+    } catch {
+      // proceed to Piped fallback
+    }
+
+    // 2. Emergency Piped Instances Fallback (Identical to Echo Music v1.3+ 403 fallback)
+    const pipedInstances = [
+      'https://pipedapi.kavin.rocks',
+      'https://api.piped.yt',
+      'https://pipedapi.adminforge.de',
+      'https://pipedapi.leptons.xyz',
+    ];
+
+    for (const base of pipedInstances) {
       try {
-        const baseUrl = this.getActiveMirrorUrl();
-        const response = await fetch(`${baseUrl}/api/v1/videos/${videoId}`, {
+        const response = await fetch(`${base}/streams/${cleanId}`, {
           headers: { Accept: 'application/json' },
         });
 
-        if (!response.ok) {
-          this.rotateMirror();
-          continue;
-        }
+        if (response.ok) {
+          const data = await response.json();
+          const audio = data.audioStreams?.find((a: any) => a.format === 'M4A' || a.codec?.includes('mp4a') || a.mimeType?.includes('audio/mp4'))
+            || data.audioStreams?.[0];
 
-        const data = await response.json();
-        const audioFormats =
-          data.adaptiveFormats?.filter((f: any) => f.type?.startsWith('audio/')) || [];
-
-        audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-        const streamUrl = audioFormats[0]?.url || data.formatStreams?.[0]?.url;
-
-        if (streamUrl) {
-          this.streamUrlCache.set(videoId, { url: streamUrl, expiresAt: now + 3 * 3600 * 1000 });
-          return streamUrl;
+          if (audio?.url) {
+            this.streamUrlCache.set(cleanId, { url: audio.url, expiresAt: now + 4 * 3600 * 1000 });
+            return audio.url;
+          }
         }
       } catch {
-        this.rotateMirror();
+        continue;
       }
     }
 
-    return `https://rr1---sn-ab5sznzl.googlevideo.com/videoplayback?id=${videoId}`;
+    return '';
   }
 }
 

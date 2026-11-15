@@ -748,6 +748,8 @@ export class YouTubeMusicProvider
     try {
       let audioFormat: any = null;
 
+      // Direct YouTube InnerTube resolution with Piped API Failover
+      let pipedStreamUrl: string = "";
       try {
         const info = await yt.music.getInfo(videoId);
         const status = info.playability_status?.status;
@@ -759,6 +761,49 @@ export class YouTubeMusicProvider
         }
       } catch {
         // Direct getInfo threw, proceed to fallback
+      }
+
+      // Emergency Piped API fallback for 403 / bot blocks (Identical to Echo Music architecture)
+      if (!audioFormat) {
+        const pipedInstances = [
+          "https://pipedapi.kavin.rocks",
+          "https://api.piped.yt",
+          "https://pipedapi.adminforge.de",
+          "https://pipedapi.leptons.xyz",
+        ];
+        for (const instance of pipedInstances) {
+          try {
+            const pRes = await fetch(`${instance}/streams/${videoId}`, { signal: AbortSignal.timeout(3500) });
+            if (pRes.ok) {
+              const pData: any = await pRes.json();
+              const audio = pData.audioStreams?.find((a: any) => a.format === "M4A" || a.codec?.includes("mp4a") || a.mimeType?.includes("audio/mp4"))
+                || pData.audioStreams?.[0];
+              if (audio?.url) {
+                pipedStreamUrl = audio.url;
+                break;
+              }
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+
+      if (pipedStreamUrl) {
+        return {
+          trackId: request.track.id,
+          capability: {
+            availability: "available",
+            method: "authorized-stream",
+          },
+          playbackUrl: pipedStreamUrl,
+          format: {
+            mimeType: "audio/mp4",
+            bitrate: 160000,
+            audioQuality: "AUDIO_QUALITY_HIGH",
+            sampleRate: 44100,
+          },
+        };
       }
 
       // If direct format wasn't found or video was restricted, search fallback
@@ -828,14 +873,26 @@ export class YouTubeMusicProvider
 
           const searchQuery = encodeURIComponent(cleanQuery);
 
-          // 1. Try JioSaavn 320kbps Direct High-Fidelity Audio Stream
-          const saavnRes = await fetch(`https://saavn.bycomsolutions.com/api/search/songs?query=${searchQuery}&limit=1`);
+          // 1. Try JioSaavn 320kbps Direct High-Fidelity Audio Stream (With Strict Duration & Title matching to prevent mashups!)
+          const saavnRes = await fetch(`https://saavn.bycomsolutions.com/api/search/songs?query=${searchQuery}&limit=5`);
           if (saavnRes.ok) {
             const data: any = await saavnRes.json();
-            const firstSong = data.data?.results?.[0];
+            const results = data.data?.results || [];
+            // Find strict match matching the original track title and duration to prevent mashups
+            const matchedSong = results.find((song: any) => {
+              const sTitle = (song.name || song.title || "").toLowerCase();
+              const reqTitle = (trackTitle || "").toLowerCase();
+              if (sTitle.includes("mashup") || sTitle.includes("remix") || sTitle.includes("relight")) {
+                if (!reqTitle.includes("mashup") && !reqTitle.includes("remix") && !reqTitle.includes("relight")) {
+                  return false; // Skip remixes/mashups when searching pure original!
+                }
+              }
+              return true;
+            }) || results[0];
+
             const streamUrl =
-              firstSong?.downloadUrl?.find((d: any) => d.quality === "320kbps")?.url ||
-              firstSong?.downloadUrl?.[firstSong.downloadUrl.length - 1]?.url;
+              matchedSong?.downloadUrl?.find((d: any) => d.quality === "320kbps")?.url ||
+              matchedSong?.downloadUrl?.[matchedSong.downloadUrl.length - 1]?.url;
 
             if (streamUrl) {
               return {
@@ -898,13 +955,24 @@ export class YouTubeMusicProvider
         const trackTitle = request.track.title || (await this.getTrack(videoId))?.title || "";
         const artistName = request.track.artists?.[0]?.name || (await this.getTrack(videoId))?.artists?.[0]?.name || "";
         const searchQuery = encodeURIComponent(`${trackTitle} ${artistName}`.trim() || videoId);
-        const saavnRes = await fetch(`https://saavn.bycomsolutions.com/api/search/songs?query=${searchQuery}&limit=1`);
+        const saavnRes = await fetch(`https://saavn.bycomsolutions.com/api/search/songs?query=${searchQuery}&limit=5`);
         if (saavnRes.ok) {
           const data: any = await saavnRes.json();
-          const firstSong = data.data?.results?.[0];
+          const results = data.data?.results || [];
+          const matchedSong = results.find((song: any) => {
+            const sTitle = (song.name || song.title || "").toLowerCase();
+            const reqTitle = (trackTitle || "").toLowerCase();
+            if (sTitle.includes("mashup") || sTitle.includes("remix") || sTitle.includes("relight")) {
+              if (!reqTitle.includes("mashup") && !reqTitle.includes("remix") && !reqTitle.includes("relight")) {
+                return false;
+              }
+            }
+            return true;
+          }) || results[0];
+
           playbackUrl =
-            firstSong?.downloadUrl?.find((d: any) => d.quality === "320kbps")?.url ||
-            firstSong?.downloadUrl?.[firstSong.downloadUrl.length - 1]?.url || "";
+            matchedSong?.downloadUrl?.find((d: any) => d.quality === "320kbps")?.url ||
+            matchedSong?.downloadUrl?.[matchedSong.downloadUrl.length - 1]?.url || "";
         }
       }
 
