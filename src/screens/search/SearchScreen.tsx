@@ -37,6 +37,7 @@ export const SearchScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Track[]>([]);
   const [dailyMix, setDailyMix] = useState<Track[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const debounceTimer = useRef<any>(null);
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export const SearchScreen: React.FC = () => {
   useEffect(() => {
     if (!query.trim()) {
       musicApiService.getTrendingTracks(25).then(setResults);
+      setSuggestions([]);
       setLoading(false);
       setAiMood(null);
       return;
@@ -66,8 +68,12 @@ export const SearchScreen: React.FC = () => {
           setResults(aiRes.tracks);
           setAiMood(aiRes.mood);
         } else {
-          const liveResults = await musicApiService.searchTracks(query);
+          const [liveResults, suggs] = await Promise.all([
+            musicApiService.searchTracks(query),
+            musicApiService.getSearchSuggestions(query),
+          ]);
           setResults(liveResults);
+          setSuggestions(suggs);
           setAiMood(null);
         }
       } catch (err) {
@@ -154,6 +160,38 @@ export const SearchScreen: React.FC = () => {
             <Text style={styles.aiModeText}>{isAIMode ? 'AI ON' : 'AI Mode'}</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Autocomplete Suggestions from YouTube */}
+        {!isAIMode && suggestions.length > 0 && query.trim().length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, paddingBottom: 14 }}
+          >
+            {suggestions.slice(0, 8).map((sugg, idx) => (
+              <TouchableOpacity
+                key={`sugg-${idx}`}
+                activeOpacity={0.8}
+                onPress={() => {
+                  hapticFeedback.light();
+                  setQuery(sugg);
+                }}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 14,
+                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255, 255, 255, 0.12)',
+                }}
+              >
+                <Text style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.85)', fontWeight: '600' }}>
+                  {sugg}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
 
         {/* AI Suggested Prompt Capsules (Visible when in AI Mode or when query is empty) */}
         {isAIMode && (

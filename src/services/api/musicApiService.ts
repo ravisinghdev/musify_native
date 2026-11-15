@@ -48,9 +48,32 @@ class MusicApiService {
       return this.searchCache.get(key)!;
     }
 
+    // 1. Direct Render YouTube search as primary source
+    if (RENDER_BACKEND_URL) {
+      try {
+        const res = await this.fetchWithTimeout(
+          `${RENDER_BACKEND_URL}/api/v1/search?q=${encodeURIComponent(trimmed)}&type=song`,
+          4000
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const rawTracks = json.tracks || json.data || json.results || [];
+          if (Array.isArray(rawTracks) && rawTracks.length > 0) {
+            const formatted = rawTracks.map((item: any) => this.formatRenderTrack(item)).filter(Boolean) as Track[];
+            if (formatted.length > 0) {
+              this.searchCache.set(key, formatted);
+              return formatted;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Render search error:', err);
+      }
+    }
+
     const promises: Promise<Track[]>[] = [];
 
-    // Source 1: JioSaavn Live Direct Search (Exact metadata, 320kbps/160kbps official CDNs)
+    // Source 2: JioSaavn Live Direct Search (Exact metadata, 320kbps/160kbps official CDNs)
     promises.push(
       (async () => {
         try {
@@ -191,8 +214,59 @@ class MusicApiService {
   }
 
   /**
-   * Get trending tracks (defaults to top Hindi & Global trending tracks)
+   * Resolve direct playable stream URL for a track.
+   * If the track already has a direct CDN URL, returns it immediately.
+   * If it has a Render stream URL or YouTube ID, resolves high-speed 320kbps playback URL.
    */
+  async resolvePlayableStream(track: Track): Promise<string> {
+    if (!track) return '';
+
+    // If mediaUrl is already a direct audio file CDN (.mp4, .m4a, .mp3)
+    if (track.mediaUrl && (track.mediaUrl.includes('saavncdn.com') || track.mediaUrl.includes('apple.com') || track.mediaUrl.includes('audius.co'))) {
+      return track.mediaUrl;
+    }
+
+    const cleanId = (track.id || '').replace(/^yt_/, '');
+
+    // Query Render playback endpoint to resolve direct 320kbps CDN or direct YouTube deciphered audio
+    if (RENDER_BACKEND_URL && cleanId) {
+      try {
+        const res = await this.fetchWithTimeout(`${RENDER_BACKEND_URL}/api/v1/tracks/${cleanId}/playback`, 4500);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.playbackUrl) {
+            return json.playbackUrl;
+          }
+        }
+      } catch (err) {
+        console.warn('Playback resolution error:', err);
+      }
+    }
+
+    // Fallback: return stream proxy URL
+    return track.mediaUrl || `${RENDER_BACKEND_URL}/api/v1/tracks/${cleanId}/stream`;
+  }
+
+  /**
+   * Search suggestions (autocomplete) from Render YouTube search
+   */
+  async getSearchSuggestions(query: string): Promise<string[]> {
+    const trimmed = query.trim();
+    if (!trimmed || !RENDER_BACKEND_URL) return [];
+    try {
+      const res = await this.fetchWithTimeout(
+        `${RENDER_BACKEND_URL}/api/v1/search/suggestions?q=${encodeURIComponent(trimmed)}`,
+        2500
+      );
+      if (res.ok) {
+        const json = await res.json();
+        return Array.isArray(json) ? json : [];
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }
   async getTrendingTracks(limit = 30): Promise<Track[]> {
     if (this.trendingTracksCache && this.trendingTracksCache.length > 0) {
       return this.trendingTracksCache.slice(0, limit);

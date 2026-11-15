@@ -6,6 +6,7 @@ import { useEqualizerStore } from '../../store/useEqualizerStore';
 import { useSleepTimerStore } from '../../store/useSleepTimerStore';
 import { useVideoSyncStore } from '../../store/useVideoSyncStore';
 import { cloudService } from '../../services/supabase/cloudService';
+import { musicApiService } from '../../services/api/musicApiService';
 
 /**
  * Universal Native Player Engine using `expo-video`'s robust ExoPlayer core.
@@ -24,28 +25,33 @@ export const NativeAudioController: React.FC = () => {
 
   // 1. Manage track loading / switching with the native player
   useEffect(() => {
-    const mediaUrl = currentTrack?.mediaUrl;
-    if (!mediaUrl) return;
+    if (!currentTrack) return;
+    let isMounted = true;
 
-    const secureUrl = mediaUrl.startsWith('http://')
-      ? mediaUrl.replace('http://', 'https://')
-      : mediaUrl;
+    const prepareAndPlay = async () => {
+      const resolvedUrl = await musicApiService.resolvePlayableStream(currentTrack);
+      if (!isMounted) return;
 
-    if (currentLoadedUrlRef.current === secureUrl && playerRef.current) {
-      return;
-    }
+      const mediaUrl = resolvedUrl || currentTrack.mediaUrl;
+      if (!mediaUrl) return;
 
-    currentLoadedUrlRef.current = secureUrl;
-    lastReportedSecRef.current = -1;
-    isSwitchingTrackRef.current = true;
+      const secureUrl = mediaUrl.startsWith('http://')
+        ? mediaUrl.replace('http://', 'https://')
+        : mediaUrl;
 
-    // Reset store position to 0 immediately
-    usePlayerStore.getState().updatePlaybackPosition(0, currentTrack?.duration || 0);
+      if (currentLoadedUrlRef.current === secureUrl && playerRef.current) {
+        return;
+      }
 
-    // Automatically record to cloud user_history in database
-    if (currentTrack) {
+      currentLoadedUrlRef.current = secureUrl;
+      lastReportedSecRef.current = -1;
+      isSwitchingTrackRef.current = true;
+
+      // Reset store position to 0 immediately
+      usePlayerStore.getState().updatePlaybackPosition(0, currentTrack?.duration || 0);
+
+      // Automatically record to cloud user_history in database
       cloudService.logPlayHistory(currentTrack);
-    }
 
     const videoSource = {
       uri: secureUrl,
@@ -171,6 +177,9 @@ export const NativeAudioController: React.FC = () => {
         console.warn('Error replacing track source:', err);
       }
     }
+    };
+    prepareAndPlay();
+    return () => { isMounted = false; };
   }, [currentTrack?.id, currentTrack?.mediaUrl]);
 
   // 2. Play / Pause Store Sync
