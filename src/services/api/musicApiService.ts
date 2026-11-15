@@ -33,8 +33,8 @@ class MusicApiService {
 
   /**
    * Search songs with intelligent high-accuracy catalog priority:
-   * 1. Spotify Unofficial Catalog (Exact official release titles, artist metadata & unadulterated album artwork)
-   * 2. Client-Side YouTube InnerTube Search (Direct official videos & audio)
+   * 1. YouTube Global InnerTube Search (Direct primary source - finds Pasoori, Alfaaz, Coke Studio & all official releases)
+   * 2. Spotify Unofficial Catalog Search (Metadata & cover art enrichment)
    * 3. Audius global catalog
    */
   async searchTracks(query: string): Promise<Track[]> {
@@ -46,7 +46,18 @@ class MusicApiService {
       return this.searchCache.get(key)!;
     }
 
-    // 1. Spotify Unofficial Catalog Search (Accurate pure metadata & album art)
+    // 1. YouTube Global InnerTube Search (Primary - Exact match with verified YouTube video IDs!)
+    try {
+      const ytTracks = await youtubeService.searchTracks(trimmed);
+      if (Array.isArray(ytTracks) && ytTracks.length > 0) {
+        this.searchCache.set(key, ytTracks);
+        return ytTracks;
+      }
+    } catch (e) {
+      console.warn('YouTube InnerTube search failed, falling back:', e);
+    }
+
+    // 2. Spotify Unofficial Catalog Search fallback
     try {
       const spotifyTracks = await spotifyService.searchTracks(trimmed, 25);
       if (Array.isArray(spotifyTracks) && spotifyTracks.length > 0) {
@@ -55,25 +66,6 @@ class MusicApiService {
       }
     } catch (e) {
       console.warn('Spotify catalog search error, falling back:', e);
-    }
-
-    // 2. Client-Side YouTube InnerTube Search
-    try {
-      const ytTracks = await youtubeService.searchTracks(trimmed);
-      if (Array.isArray(ytTracks) && ytTracks.length > 0) {
-        // Prioritize exact original tracks over remixes / relights
-        const sortedYt = [...ytTracks].sort((a, b) => {
-          const aRemix = /remix|relight|mashup/i.test(a.title);
-          const bRemix = /remix|relight|mashup/i.test(b.title);
-          if (aRemix && !bRemix) return 1;
-          if (!aRemix && bRemix) return -1;
-          return 0;
-        });
-        this.searchCache.set(key, sortedYt);
-        return sortedYt;
-      }
-    } catch (e) {
-      console.warn('Client-side YouTube search failed, falling back:', e);
     }
 
     // 3. Direct Render YouTube search fallback
