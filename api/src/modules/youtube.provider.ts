@@ -694,32 +694,51 @@ export class YouTubeMusicProvider
   }
 
   async getTrack(trackId: string): Promise<Track | null> {
-    const yt = await this.ytPromise;
     const cleanId = trackId.replace(/^yt_/, "");
-    try {
-      const info = await yt.music.getInfo(cleanId);
-      const basic = info.basic_info;
-      const artworkUrl =
-        extractThumbnail(basic) ||
-        `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`;
+    let title = "";
+    let artist = "";
 
-      return {
-        id: `yt_${cleanId}`,
-        title: extractText(basic.title, "Unknown Title"),
-        artists: [
-          {
-            id: basic.channel_id ?? "",
-            name: extractText(basic.author, "Unknown Artist"),
-          },
-        ],
-        durationMs: (basic.duration ?? 0) * 1000,
-        artworkUrl,
-        source: this.sourceId,
-        sourceTrackId: cleanId,
-      };
-    } catch {
-      return null;
+    // 1. Try YouTube oEmbed for accurate metadata without InnerTube bot blocks
+    try {
+      const oembedRes = await fetch(
+        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${cleanId}&format=json`,
+      );
+      if (oembedRes.ok) {
+        const oembedData: any = await oembedRes.json();
+        title = oembedData.title || "";
+        artist = (oembedData.author_name || "")
+          .replace(/ - Topic$/, "")
+          .trim();
+      }
+    } catch {}
+
+    // 2. Try InnerTube if oembed failed
+    if (!title) {
+      try {
+        const yt = await this.ytPromise;
+        const info = await yt.music.getInfo(cleanId);
+        const basic = info.basic_info;
+        title = extractText(basic.title, "");
+        artist = extractText(basic.author, "");
+      } catch {}
     }
+
+    if (!title) return null;
+
+    return {
+      id: `yt_${cleanId}`,
+      title,
+      artists: [
+        {
+          id: cleanId,
+          name: artist || "Various Artists",
+        },
+      ],
+      durationMs: 210000,
+      artworkUrl: `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`,
+      source: this.sourceId,
+      sourceTrackId: cleanId,
+    };
   }
 
   async getPlayback(request: PlaybackRequest): Promise<PlaybackResult> {
@@ -782,9 +801,32 @@ export class YouTubeMusicProvider
       if (!audioFormat) {
         // High-Fidelity Multi-CDN Audio Resolution Failover (JioSaavn 320kbps & Apple Music)
         try {
-          const trackTitle = request.track.title || (await this.getTrack(videoId))?.title || "";
-          const artistName = request.track.artists?.[0]?.name || (await this.getTrack(videoId))?.artists?.[0]?.name || "";
-          const searchQuery = encodeURIComponent(`${trackTitle} ${artistName}`.trim() || videoId);
+          let trackTitle = request.track.title;
+          let artistName = request.track.artists?.[0]?.name;
+
+          if (!trackTitle || trackTitle === "Unknown Title") {
+            const fetched = await this.getTrack(videoId);
+            if (fetched) {
+              trackTitle = fetched.title;
+              artistName = fetched.artists?.[0]?.name;
+            }
+          }
+
+          const cleanQuery = `${trackTitle || ""} ${artistName || ""}`
+            .replace(/ - Topic$/, "")
+            .trim();
+
+          if (!cleanQuery) {
+            return {
+              trackId: request.track.id,
+              capability: {
+                availability: "unavailable",
+                reason: "Could not resolve track metadata for CDN lookup",
+              },
+            };
+          }
+
+          const searchQuery = encodeURIComponent(cleanQuery);
 
           // 1. Try JioSaavn 320kbps Direct High-Fidelity Audio Stream
           const saavnRes = await fetch(`https://saavn.bycomsolutions.com/api/search/songs?query=${searchQuery}&limit=1`);
