@@ -2,8 +2,8 @@ import { Track, Playlist, Artist } from '../../types/models';
 import { decodeHtmlEntities } from '../../utils/textUtils';
 
 // Dedicated production backends
-export const RENDER_BACKEND_URL: string = 'https://musify-4fzw.onrender.com';
-export const DEDICATED_BACKEND_URL: string = 'https://musifynative-server.vercel.app';
+export const RENDER_BACKEND_URL: string = 'https://musify-native.onrender.com';
+export const DEDICATED_BACKEND_URL: string = 'https://musify-native.onrender.com';
 
 const SAAVN_BASE = 'https://saavn.dev/api';
 const SAAVN_FALLBACK = 'https://saavn.me/api';
