@@ -2,9 +2,9 @@ import React, { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { usePlayerStore } from './src/store/usePlayerStore';
-import { setAudioModeAsync } from 'expo-audio';
 import { NativeAudioController } from './src/components/player/NativeAudioController';
 
 export default function App() {
@@ -20,19 +20,8 @@ export default function App() {
     seekTo,
   } = usePlayerStore();
 
-  // 1. Configure audio mode on app mount
-  useEffect(() => {
-    if (Platform.OS !== 'web') {
-      setAudioModeAsync({
-        playsInSilentMode: true,
-        interruptionMode: 'doNotMix',
-        interruptionModeAndroid: 'doNotMix',
-        allowsRecording: false,
-        shouldPlayInBackground: false,
-        shouldRouteThroughEarpiece: false,
-      }).catch(console.error);
-    }
-  }, []);
+  // 1. Audio mode configured inside NativeAudioController with expo-av
+  useEffect(() => {}, []);
 
   // 2. Web HTML5 Audio Player
   useEffect(() => {
@@ -125,18 +114,16 @@ export default function App() {
   }, [currentTrack]);
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <AppNavigator />
-        {/* On native mobile: Mount a fresh player instance whenever mediaUrl changes.
-            This gives a brand-new native ExoPlayer with 100% volume and zero state corruption! */}
-        {Platform.OS !== 'web' && currentTrack?.mediaUrl ? (
-          <NativeAudioController
-            key={currentTrack.id || currentTrack.mediaUrl}
-            mediaUrl={currentTrack.mediaUrl}
-          />
-        ) : null}
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <AppNavigator />
+          {/* Single persistent audio engine instance */}
+          {Platform.OS !== 'web' ? (
+            <NativeAudioController />
+          ) : null}
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -15,6 +15,9 @@ export interface Track {
   likes?: number;
   isLiked?: boolean;
   videoQuality?: string;
+  lowQualityVideoUrl?: string;
+  highQualityVideoUrl?: string;
+  renderStreamUrl?: string;
   lyrics?: string[];
 }
 

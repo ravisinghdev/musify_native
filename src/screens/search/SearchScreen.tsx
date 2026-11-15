@@ -1,23 +1,47 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
-import { Search, X, Video, Disc3, Sparkles } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  ScrollView,
+  Platform,
+} from 'react-native';
+import {
+  Search,
+  ChevronLeft,
+  MoreHorizontal,
+  Sparkles,
+  Play,
+  Pause,
+  Settings,
+} from 'lucide-react-native';
+import { BlurView } from 'expo-blur';
 import { AppShell } from '../../components/layout/AppShell';
-import { useThemeStore } from '../../store/useThemeStore';
 import { usePlayerStore } from '../../store/usePlayerStore';
+import { useThemeStore } from '../../store/useThemeStore';
 import { musicApiService } from '../../services/api/musicApiService';
+import { aiMusicService, AI_SUGGESTED_PROMPTS } from '../../services/ai/aiMusicService';
 import { Track } from '../../types/models';
+import { hapticFeedback } from '../../utils/haptics';
 
 export const SearchScreen: React.FC = () => {
   const { colors } = useThemeStore();
-  const { playTrack, currentTrack } = usePlayerStore();
+  const { playTrack, currentTrack, playbackStatus, togglePlayPause } = usePlayerStore();
   const [query, setQuery] = useState('');
+  const [isAIMode, setIsAIMode] = useState(false);
+  const [aiMood, setAiMood] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Track[]>([]);
+  const [dailyMix, setDailyMix] = useState<Track[]>([]);
   const debounceTimer = useRef<any>(null);
 
   useEffect(() => {
-    // Initially load trending tracks on search screen
-    musicApiService.getTrendingTracks(20).then((tracks) => {
+    musicApiService.getTrendingTracks(25).then((tracks) => {
+      setDailyMix(tracks.slice(0, 4));
       if (!query.trim()) {
         setResults(tracks);
       }
@@ -26,8 +50,9 @@ export const SearchScreen: React.FC = () => {
 
   useEffect(() => {
     if (!query.trim()) {
-      musicApiService.getTrendingTracks(20).then(setResults);
+      musicApiService.getTrendingTracks(25).then(setResults);
       setLoading(false);
+      setAiMood(null);
       return;
     }
 
@@ -36,165 +61,449 @@ export const SearchScreen: React.FC = () => {
     debounceTimer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const liveResults = await musicApiService.searchTracks(query);
-        setResults(liveResults);
+        if (isAIMode) {
+          const aiRes = await aiMusicService.generatePlaylistFromPrompt(query);
+          setResults(aiRes.tracks);
+          setAiMood(aiRes.mood);
+        } else {
+          const liveResults = await musicApiService.searchTracks(query);
+          setResults(liveResults);
+          setAiMood(null);
+        }
       } catch (err) {
         console.warn('Search query error:', err);
       } finally {
         setLoading(false);
       }
-    }, 350);
+    }, isAIMode ? 500 : 300);
 
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
-  }, [query]);
+  }, [query, isAIMode]);
+
+  const handleApplyAIPrompt = async (promptText: string) => {
+    hapticFeedback.medium();
+    setIsAIMode(true);
+    setQuery(promptText);
+  };
+
+  const isCurrentPlaying = (trackId: string) =>
+    currentTrack?.id === trackId && playbackStatus === 'playing';
 
   return (
     <AppShell>
-      <View style={styles.container}>
-        <View style={styles.headerRow}>
-          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Search</Text>
-          <View style={[styles.ytBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.surfaceBorder }]}>
-            <Sparkles size={13} color={colors.primary} />
-            <Text style={[styles.ytBadgeText, { color: colors.textSecondary }]}>YT.js Powered</Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* 1. Header with Circular Glass Buttons */}
+        <View style={styles.topNavRow}>
+          <TouchableOpacity style={styles.glassCircleBtn} activeOpacity={0.8}>
+            <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />
+            <ChevronLeft size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.glassCircleBtn} activeOpacity={0.8}>
+            <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />
+            <MoreHorizontal size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+
+        {/* 2. Page Title & Subtitle */}
+        <View style={styles.heroTextSection}>
+          <Text style={styles.pageTitle}>Discover</Text>
+          <Text style={styles.pageSubtitle}>Explore new music and more</Text>
+        </View>
+
+        {/* 3. Search Bar with Embedded AI Mode Pill */}
+        <View style={styles.searchBarWrapper}>
+          <BlurView intensity={75} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={styles.glassWash} />
+
+          <Search size={18} color="rgba(255, 255, 255, 0.65)" style={styles.searchIcon} />
+          <TextInput
+            placeholder={
+              isAIMode
+                ? 'Describe your vibe (e.g. late night acoustic)...'
+                : 'Search music, artists, podcasts...'
+            }
+            placeholderTextColor="rgba(255, 255, 255, 0.45)"
+            value={query}
+            onChangeText={setQuery}
+            style={styles.searchInput}
+          />
+
+          {/* AI Mode Capsule Toggle Button */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              hapticFeedback.medium();
+              setIsAIMode(!isAIMode);
+            }}
+            style={[
+              styles.aiModePill,
+              isAIMode && {
+                backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                borderColor: colors.primary,
+                borderWidth: 1,
+              },
+            ]}
+          >
+            <Sparkles size={14} color={isAIMode ? colors.primary : '#FFFFFF'} />
+            <Text style={styles.aiModeText}>{isAIMode ? 'AI ON' : 'AI Mode'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* AI Suggested Prompt Capsules (Visible when in AI Mode or when query is empty) */}
+        {isAIMode && (
+          <View style={{ marginBottom: 18 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <Sparkles size={14} color={colors.primary} />
+              <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFFFFF' }}>
+                AI Vibe Suggestions
+              </Text>
+              {aiMood && (
+                <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: 'rgba(255, 255, 255, 0.12)' }}>
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: colors.primary }}>{aiMood}</Text>
+                </View>
+              )}
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {AI_SUGGESTED_PROMPTS.map((item) => (
+                <TouchableOpacity
+                  key={item.label}
+                  activeOpacity={0.85}
+                  onPress={() => handleApplyAIPrompt(item.label)}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 18,
+                    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.12)',
+                  }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: item.color }}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* 4. Daily Mix Section with Multi-Cover Card (Semi-transparent Glass) */}
+        <View style={styles.dailyMixCard}>
+          <BlurView intensity={75} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={styles.glassWash} />
+
+          <View style={styles.dailyMixHeader}>
+            <View>
+              <Text style={styles.dailyMixTitle}>Daily Mix</Text>
+              <Text style={styles.dailyMixSubtitle}>Your daily soundtrack.</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                if (dailyMix.length > 0) playTrack(dailyMix[0], dailyMix);
+              }}
+              style={styles.dailyPlayBtn}
+            >
+              <Play size={18} color="#FFFFFF" fill="#FFFFFF" style={{ marginLeft: 2 }} />
+            </TouchableOpacity>
+          </View>
+
+          {/* 4 Album Covers Row */}
+          <View style={styles.dailyCoversRow}>
+            {dailyMix.slice(0, 4).map((item, idx) => (
+              <TouchableOpacity
+                key={`${item.id}-${idx}`}
+                activeOpacity={0.85}
+                onPress={() => playTrack(item, dailyMix)}
+                style={styles.dailyThumbWrap}
+              >
+                <Image source={{ uri: item.artworkUrl }} style={styles.dailyThumb} />
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
-        {/* Search Bar Input */}
-        <View style={[styles.inputContainer, { backgroundColor: colors.surfaceElevated, borderColor: colors.surfaceBorder }]}>
-          <Search size={18} color={colors.textSecondary} style={styles.searchIcon} />
-          <TextInput
-            placeholder="Search any song, artist, album on YouTube..."
-            placeholderTextColor={colors.textMuted}
-            value={query}
-            onChangeText={setQuery}
-            style={[styles.input, { color: colors.textPrimary }]}
-          />
-          {loading && <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 8 }} />}
-          {query.length > 0 && !loading && (
-            <TouchableOpacity onPress={() => setQuery('')}>
-              <X size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
-          )}
+        {/* 5. New Releases Section List */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>New Releases</Text>
+          <TouchableOpacity>
+            <Text style={styles.seeAllText}>See all</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Results List */}
-        <FlatList
-          data={results}
-          keyExtractor={(item, index) => `${item.id}-${index}`}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContainer}
-          renderItem={({ item }: { item: Track }) => {
-            const isCurrent = currentTrack?.id === item.id;
+        {loading ? (
+          <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : (
+          results.slice(0, 15).map((track, idx) => {
+            const playing = isCurrentPlaying(track.id);
+            const isSelected = currentTrack?.id === track.id;
+
             return (
-              <TouchableOpacity
-                onPress={() => playTrack(item, results)}
-                style={[
-                  styles.trackItem,
-                  {
-                    backgroundColor: isCurrent ? colors.surfaceElevated : 'transparent',
-                    borderColor: colors.surfaceBorder,
-                  },
-                ]}
-              >
-                <Image source={{ uri: item.artworkUrl }} style={styles.artwork} />
-                <View style={styles.trackDetails}>
-                  <Text numberOfLines={1} style={[styles.trackTitle, { color: isCurrent ? colors.primary : colors.textPrimary }]}>
-                    {item.title}
-                  </Text>
-                  <Text numberOfLines={1} style={[styles.trackSubtitle, { color: colors.textSecondary }]}>
-                    {item.artist} • {item.album || 'YouTube'}
-                  </Text>
-                </View>
-                {item.type === 'video' ? (
-                  <Video size={18} color={colors.primary} />
-                ) : (
-                  <Disc3 size={18} color={isCurrent ? colors.primary : colors.textMuted} />
-                )}
-              </TouchableOpacity>
+              <View key={`${track.id}-${idx}`}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => playTrack(track, results)}
+                  style={styles.releaseRow}
+                >
+                  <Image source={{ uri: track.artworkUrl }} style={styles.trackArtwork} />
+
+                  <View style={styles.trackMetaWrap}>
+                    <Text numberOfLines={1} style={styles.trackTitle}>
+                      {track.title}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.trackArtist}>
+                      {track.artist}
+                    </Text>
+                  </View>
+
+                  {/* Duration & Playing Button */}
+                  <View style={styles.rowRightActions}>
+                    <Text style={styles.durationText}>
+                      {track.duration ? `${Math.floor(track.duration / 60)}:${String(Math.floor(track.duration % 60)).padStart(2, '0')}` : '03:15'}
+                    </Text>
+                    <TouchableOpacity
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      onPress={() => {
+                        if (isSelected) {
+                          togglePlayPause();
+                        } else {
+                          playTrack(track, results);
+                        }
+                      }}
+                      style={styles.circlePlayPause}
+                    >
+                      {playing ? (
+                        <Pause size={14} color="#FFFFFF" fill="#FFFFFF" />
+                      ) : (
+                        <Play size={14} color="#FFFFFF" fill="#FFFFFF" style={{ marginLeft: 2 }} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Subtle Translucent Liquid Divider Line */}
+                <View style={styles.rowDivider} />
+              </View>
             );
-          }}
-        />
-      </View>
+          })
+        )}
+      </ScrollView>
     </AppShell>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 8,
+    paddingBottom: 170, // Leaves space so items can be scrolled past the floating miniplayer
   },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: '800',
+  topNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 16,
+    marginTop: 4,
   },
-  headerRow: {
+  glassCircleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  heroTextSection: {
+    marginBottom: 18,
+  },
+  pageTitle: {
+    fontSize: 34,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.8,
+    marginBottom: 4,
+  },
+  pageSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.65)',
+  },
+  searchBarWrapper: {
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 16,
+    paddingRight: 6,
+    marginBottom: 20,
+    backgroundColor: 'transparent',
+  },
+  glassWash: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    height: '100%',
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  aiModePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  aiModeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dailyMixCard: {
+    borderRadius: 28,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    overflow: 'hidden',
+    padding: 18,
+    backgroundColor: 'transparent',
+    marginBottom: 24,
+  },
+  dailyMixHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  ytBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  dailyMixTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+    marginBottom: 2,
+  },
+  dailyMixSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.65)',
+  },
+  dailyPlayBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
     borderWidth: 1,
-  },
-  ytBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  inputContainer: {
-    flexDirection: 'row',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
     alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    height: 48,
-    marginBottom: 16,
+    justifyContent: 'center',
   },
-  searchIcon: {
-    marginRight: 8,
+  dailyCoversRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  input: {
-    flex: 1,
-    fontSize: 15,
+  dailyThumbWrap: {
+    width: '23%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
-  listContainer: {
-    paddingBottom: 24,
+  dailyThumb: {
+    width: '100%',
+    height: '100%',
   },
-  trackItem: {
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+  },
+  seeAllText: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontWeight: '600',
+  },
+  releaseRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 0.5,
-    marginBottom: 8,
+    paddingHorizontal: 6,
+    borderRadius: 18,
+    marginBottom: 4,
   },
-  artwork: {
-    width: 46,
-    height: 46,
-    borderRadius: 8,
-    marginRight: 12,
+  trackArtwork: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    marginRight: 14,
   },
-  trackDetails: {
+  trackMetaWrap: {
     flex: 1,
   },
   trackTitle: {
     fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 2,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 3,
   },
-  trackSubtitle: {
+  trackArtist: {
     fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.65)',
+  },
+  rowRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  durationText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontWeight: '500',
+  },
+  circlePlayPause: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginLeft: 68,
+    marginRight: 6,
+    marginVertical: 4,
   },
 });
-

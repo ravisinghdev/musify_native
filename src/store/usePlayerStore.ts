@@ -12,10 +12,12 @@ interface PlayerState {
   repeatMode: RepeatMode;
   isFullPlayerVisible: boolean;
   isVideoMode: boolean;
+  userTapPlayCount: number;
 
   // Actions
   playTrack: (track: Track, newQueue?: Track[]) => void;
   togglePlayPause: () => void;
+  triggerUserTapPlay: () => void;
   nextTrack: () => void;
   previousTrack: () => void;
   seekTo: (position: number) => void;
@@ -38,6 +40,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   repeatMode: 'off',
   isFullPlayerVisible: false,
   isVideoMode: false,
+  userTapPlayCount: 0,
+
+  triggerUserTapPlay: () => {
+    set((s) => ({ userTapPlayCount: s.userTapPlayCount + 1 }));
+  },
 
   playTrack: (track, newQueue) => {
     const queue = newQueue || get().queue;
@@ -46,15 +53,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       : [track, ...queue];
     const index = finalQueue.findIndex((t) => t.id === track.id);
 
-    set({
+    set((s) => ({
       currentTrack: track,
       queue: finalQueue,
       queueIndex: index >= 0 ? index : 0,
-      playbackStatus: 'playing',
+      playbackStatus: 'buffering',
       position: 0,
-      duration: track.duration,
+      duration: track.duration > 0 ? track.duration : 0,
       isVideoMode: track.type === 'video',
-    });
+      userTapPlayCount: s.userTapPlayCount + 1,
+    }));
   },
 
   togglePlayPause: () => {

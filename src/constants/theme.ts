@@ -1,66 +1,93 @@
-export type AccentColor = 'violet' | 'emerald' | 'cyan' | 'ruby' | 'gold';
+export type AccentColor =
+  | 'obsidianGlass'
+  | 'pearlGlass'
+  | 'midnightLuxe';
+
+export type ThemeMode = 'oled' | 'dark' | 'light' | 'system';
 
 export interface ThemeColors {
   primary: string;
   primaryLight: string;
   primaryDark: string;
+  glow: string;
   background: string;
   surface: string;
   surfaceElevated: string;
   surfaceBorder: string;
+  surfaceCard: string;
   textPrimary: string;
   textSecondary: string;
   textMuted: string;
   accent: string;
   error: string;
   success: string;
+  isLight: boolean;
 }
 
-export const ACCENT_PALETTES: Record<AccentColor, { primary: string; primaryLight: string; primaryDark: string }> = {
-  violet: {
-    primary: '#8B5CF6',
-    primaryLight: '#A78BFA',
-    primaryDark: '#6D28D9',
+export const ACCENT_PALETTES: Record<
+  AccentColor,
+  {
+    primary: string;
+    primaryLight: string;
+    primaryDark: string;
+    glow: string;
+    label: string;
+    sublabel: string;
+    previewGradient: [string, string];
+  }
+> = {
+  obsidianGlass: {
+    label: 'Obsidian',
+    sublabel: 'Default • Soft Silver & Muted Steel Blue',
+    primary: '#B8C0CC',
+    primaryLight: '#F0F1F4',
+    primaryDark: '#71869F',
+    glow: 'rgba(184, 192, 204, 0.18)',
+    previewGradient: ['#B8C0CC', '#08090B'],
   },
-  emerald: {
-    primary: '#10B981',
-    primaryLight: '#34D399',
-    primaryDark: '#059669',
+  pearlGlass: {
+    label: 'Pearl Glass',
+    sublabel: 'Luminescent Oyster & Pearl White Frost',
+    primary: '#E9EBF0',
+    primaryLight: '#FAF7F2',
+    primaryDark: '#A8A195',
+    glow: 'rgba(233, 235, 240, 0.22)',
+    previewGradient: ['#E9EBF0', '#1A1B20'],
   },
-  cyan: {
-    primary: '#06B6D4',
-    primaryLight: '#22D3EE',
-    primaryDark: '#0891B2',
-  },
-  ruby: {
-    primary: '#EF4444',
-    primaryLight: '#F87171',
-    primaryDark: '#B91C1C',
-  },
-  gold: {
-    primary: '#F59E0B',
-    primaryLight: '#FBBF24',
-    primaryDark: '#D97706',
+  midnightLuxe: {
+    label: 'Midnight Luxe',
+    sublabel: 'Deep Navy & Warm Champagne Gold',
+    primary: '#C5A869',
+    primaryLight: '#DFCA94',
+    primaryDark: '#1E293B',
+    glow: 'rgba(197, 168, 105, 0.22)',
+    previewGradient: ['#C5A869', '#0B1120'],
   },
 };
 
-export const getThemeColors = (accent: AccentColor = 'violet'): ThemeColors => {
-  const selectedAccent = ACCENT_PALETTES[accent] || ACCENT_PALETTES.violet;
+export const getThemeColors = (
+  accent: AccentColor = 'obsidianGlass',
+  mode: ThemeMode = 'dark'
+): ThemeColors => {
+  const selectedAccent = ACCENT_PALETTES[accent] || ACCENT_PALETTES.obsidianGlass;
 
   return {
     primary: selectedAccent.primary,
     primaryLight: selectedAccent.primaryLight,
     primaryDark: selectedAccent.primaryDark,
-    background: '#09090B', // Deep OLED dark
-    surface: '#121216',
-    surfaceElevated: '#1C1C24',
-    surfaceBorder: '#272732',
-    textPrimary: '#FFFFFF',
-    textSecondary: '#A1A1AA',
-    textMuted: '#71717A',
-    accent: selectedAccent.primary,
-    error: '#F43F5E',
-    success: '#10B981',
+    glow: selectedAccent.glow,
+    background: '#08090B', // Deep Luxury Canvas
+    surface: 'rgba(255, 255, 255, 0.045)',
+    surfaceElevated: 'rgba(255, 255, 255, 0.07)',
+    surfaceBorder: 'rgba(255, 255, 255, 0.12)',
+    surfaceCard: 'rgba(255, 255, 255, 0.045)',
+    textPrimary: '#F0F1F4',
+    textSecondary: '#969BA5',
+    textMuted: 'rgba(255, 255, 255, 0.38)',
+    accent: '#AAB8CA',
+    error: 'rgba(255, 255, 255, 0.70)',
+    success: 'rgba(255, 255, 255, 0.85)',
+    isLight: false,
   };
 };
 
@@ -74,11 +101,8 @@ export const SPACING = {
 };
 
 export const SIZES = {
-  radiusSm: 8,
-  radiusMd: 14,
-  radiusLg: 20,
-  radiusFull: 9999,
-  miniPlayerHeight: 64,
-  bottomBarHeight: 60,
+  radiusSm: 10,
+  radiusMd: 16,
+  radiusLg: 24,
+  radiusPill: 9999,
 };
-

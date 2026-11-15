@@ -1,10 +1,13 @@
 import { Track, Playlist, Artist } from '../../types/models';
+import { decodeHtmlEntities } from '../../utils/textUtils';
 
-// Dedicated production Vercel backend
+// Dedicated production backends
+export const RENDER_BACKEND_URL: string = 'https://musify-4fzw.onrender.com';
 export const DEDICATED_BACKEND_URL: string = 'https://musifynative-server.vercel.app';
 
-const SAAVN_BASE = 'https://saavn.bycomsolutions.com/api';
+const SAAVN_BASE = 'https://saavn.dev/api';
 const SAAVN_FALLBACK = 'https://saavn.me/api';
+const SAAVN_MIRROR3 = 'https://saavn.bycomsolutions.com/api';
 const AUDIUS_BASE = 'https://api.audius.co/v1';
 const ITUNES_BASE = 'https://itunes.apple.com';
 
@@ -30,8 +33,11 @@ class MusicApiService {
   }
 
   /**
-   * Search songs with ultra-fast multi-source fallback (JioSaavn -> iTunes India -> Audius)
-   * Perfectly matches Hindi/Bollywood ("Arz Kiya Hai", "Aarzoo", "Kesariya") as well as global hits!
+   * Search songs with intelligent high-accuracy catalog priority:
+   * 1. JioSaavn Live Catalog (Accurate official release titles, artist metadata & 320kbps CDNs)
+   * 2. Artist-augmented queries for specific tracks
+   * 3. Audius global catalog
+   * 4. Render API only as targeted stream / video resolver (not noisy raw search)
    */
   async searchTracks(query: string): Promise<Track[]> {
     const trimmed = query.trim();
@@ -42,77 +48,143 @@ class MusicApiService {
       return this.searchCache.get(key)!;
     }
 
-    // 0. Dedicated HTTPS Backend (If configured with your Vercel URL)
-    if (DEDICATED_BACKEND_URL) {
+    const promises: Promise<Track[]>[] = [];
+
+    // Source 1: JioSaavn Live Direct Search (Exact metadata, 320kbps/160kbps official CDNs)
+    promises.push(
+      (async () => {
+        try {
+          let res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=${encodeURIComponent(trimmed)}&limit=25`, 3500);
+          if (!res.ok) {
+            res = await this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=${encodeURIComponent(trimmed)}&limit=25`, 3500);
+          }
+          if (res.ok) {
+            const json = await res.json();
+            const results = json.data?.results || [];
+            if (Array.isArray(results) && results.length > 0) {
+              return results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return [];
+      })()
+    );
+
+    // Source 2: Artist-augmented Query (e.g. for "Alfaaz", also query "Alfaaz Hamza Malik" to surface the exact original)
+    if (!trimmed.includes(' ') && trimmed.length >= 3) {
+      promises.push(
+        (async () => {
+          try {
+            const res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=${encodeURIComponent(trimmed + ' Hamza Malik')}&limit=10`, 3500);
+            if (res.ok) {
+              const json = await res.json();
+              const results = json.data?.results || [];
+              if (Array.isArray(results) && results.length > 0) {
+                return results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
+              }
+            }
+          } catch {
+            // ignore
+          }
+          return [];
+        })()
+      );
+    }
+
+    // Source 3: Audius Full Length Global Track Fallback
+    promises.push(
+      (async () => {
+        try {
+          const url = `${AUDIUS_BASE}/tracks/search?query=${encodeURIComponent(trimmed)}&app_name=musify_native`;
+          const res = await this.fetchWithTimeout(url, 3500);
+          if (res.ok) {
+            const json = await res.json();
+            const rawTracks: any[] = json.data || [];
+            return rawTracks.map((t) => this.formatAudiusTrack(t)).filter((t) => t && t.mediaUrl) as Track[];
+          }
+        } catch {
+          // ignore
+        }
+        return [];
+      })()
+    );
+
+    const settled = await Promise.allSettled(promises);
+    const saavnTracks = settled[0].status === 'fulfilled' ? settled[0].value : [];
+    const augmentedTracks = settled[1] && settled[1].status === 'fulfilled' ? settled[1].value : [];
+    const audiusTracks = settled[2] && settled[2].status === 'fulfilled' ? settled[2].value : [];
+
+    // Intelligently combine and rank exact matches
+    const combined: Track[] = [];
+    const seenSignatures = new Set<string>();
+
+    const addTrack = (t: Track) => {
+      if (!t.mediaUrl) return;
+      if (t.duration && t.duration < 45) return;
+      const sig = `${t.title.toLowerCase().trim()}_${(t.artist || '').toLowerCase().trim()}`;
+      if (!seenSignatures.has(sig)) {
+        seenSignatures.add(sig);
+        combined.push(t);
+      }
+    };
+
+    // Prioritize high-accuracy official catalog
+    saavnTracks.forEach(addTrack);
+    augmentedTracks.forEach(addTrack);
+    audiusTracks.forEach(addTrack);
+
+    if (combined.length > 0) {
+      this.searchCache.set(key, combined);
+      return combined;
+    }
+
+    // Fallback: If no direct results found, query Render backend as last resort fallback
+    if (RENDER_BACKEND_URL) {
       try {
-        const res = await this.fetchWithTimeout(`${DEDICATED_BACKEND_URL}/api/search?query=${encodeURIComponent(trimmed)}`, 4000);
+        const res = await this.fetchWithTimeout(
+          `${RENDER_BACKEND_URL}/api/v1/search?query=${encodeURIComponent(trimmed)}&limit=15`,
+          4000
+        );
         if (res.ok) {
           const json = await res.json();
-          if (json.success && Array.isArray(json.results) && json.results.length > 0) {
-            this.searchCache.set(key, json.results);
-            return json.results;
+          const results = json.tracks || json.data || json.results || [];
+          if (Array.isArray(results) && results.length > 0) {
+            const fallbackTracks = results
+              .map((item: any) => this.formatRenderTrack(item))
+              .filter(Boolean) as Track[];
+            if (fallbackTracks.length > 0) {
+              this.searchCache.set(key, fallbackTracks);
+              return fallbackTracks;
+            }
           }
         }
-      } catch (e) {
-        console.warn('Dedicated backend search error, falling back to public mirrors:', e);
+      } catch {
+        // ignore
       }
     }
 
-    // 1. Primary: JioSaavn Live Catalog (Full 320kbps complete songs)
-    try {
-      let res = await this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=${encodeURIComponent(trimmed)}&limit=25`, 3500);
-      if (!res.ok) {
-        res = await this.fetchWithTimeout(`${SAAVN_FALLBACK}/search/songs?query=${encodeURIComponent(trimmed)}&limit=25`, 3500);
-      }
-      if (res.ok) {
-        const json = await res.json();
-        const results = json.data?.results || [];
-        if (Array.isArray(results) && results.length > 0) {
-          const tracks = results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
-          if (tracks.length > 0) {
-            this.searchCache.set(key, tracks);
-            return tracks;
-          }
-        }
-      }
-    } catch (err) {
-      // JioSaavn endpoint timed out or failed, try next provider
+    if (combined.length > 0) {
+      this.searchCache.set(key, combined);
+      return combined;
     }
 
-    // 2. High-speed Fallback: Audius Search (Full length complete tracks)
+    // Fallback: Audius Search (Full length tracks)
     try {
       const url = `${AUDIUS_BASE}/tracks/search?query=${encodeURIComponent(trimmed)}&app_name=musify_native`;
       const res = await this.fetchWithTimeout(url, 3500);
       if (res.ok) {
         const json = await res.json();
         const rawTracks: any[] = json.data || [];
-        const tracks = rawTracks.map((t) => this.formatAudiusTrack(t));
-        if (tracks.length > 0) {
-          this.searchCache.set(key, tracks);
-          return tracks;
+        const audiusTracks = rawTracks.map((t) => this.formatAudiusTrack(t)).filter((t) => t && t.mediaUrl) as Track[];
+        if (audiusTracks.length > 0) {
+          this.searchCache.set(key, audiusTracks);
+          return audiusTracks;
         }
       }
-    } catch (err) {
-      // Audius error
-    }
-
-    // 3. Fallback: Apple iTunes API
-    try {
-      const url = `${ITUNES_BASE}/search?term=${encodeURIComponent(trimmed)}&media=music&entity=song&country=in&limit=25`;
-      const res = await this.fetchWithTimeout(url, 3500);
-      if (res.ok) {
-        const json = await res.json();
-        const results = json.results || [];
-        if (Array.isArray(results) && results.length > 0) {
-          const tracks = results.map((item: any) => this.formatITunesTrack(item)).filter(Boolean) as Track[];
-          if (tracks.length > 0) {
-            this.searchCache.set(key, tracks);
-            return tracks;
-          }
-        }
-      }
-    } catch (err) {
-      // iTunes fallback error
+    } catch {
+      // ignore
     }
 
     return [];
@@ -126,7 +198,46 @@ class MusicApiService {
       return this.trendingTracksCache.slice(0, limit);
     }
 
-    // 0. Dedicated HTTPS Backend (If configured with your Vercel URL)
+    // 1. JioSaavn Top Trending Songs (Accurate 320kbps CDNs)
+    try {
+      let res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
+      if (!res.ok) {
+        res = await this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
+      }
+      if (res.ok) {
+        const json = await res.json();
+        const results = json.data?.results || [];
+        if (Array.isArray(results) && results.length > 0) {
+          const tracks = results.map((item: any) => this.formatSaavnTrack(item)).filter(Boolean) as Track[];
+          if (tracks.length > 0) {
+            this.trendingTracksCache = tracks;
+            return tracks.slice(0, limit);
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 2. Render Backend Recommendations fallback
+    if (RENDER_BACKEND_URL) {
+      try {
+        const res = await this.fetchWithTimeout(`${RENDER_BACKEND_URL}/api/v1/search/recommendations`, 4000);
+        if (res.ok) {
+          const json = await res.json();
+          const recTracks = json.recommendedTracks || json.tracks || json.results || [];
+          if (Array.isArray(recTracks) && recTracks.length > 0) {
+            const tracks = recTracks.map((item: any) => this.formatRenderTrack(item)).filter(Boolean) as Track[];
+            if (tracks.length > 0) {
+              this.trendingTracksCache = tracks;
+              return tracks.slice(0, limit);
+            }
+          }
+        }
+      } catch (e) {
+        // Fallback to next providers
+      }
+    }
+
+    // 1. Dedicated HTTPS Backend (If configured with your Vercel URL)
     if (DEDICATED_BACKEND_URL) {
       try {
         const res = await this.fetchWithTimeout(`${DEDICATED_BACKEND_URL}/api/trending`, 4000);
@@ -147,6 +258,9 @@ class MusicApiService {
       let res = await this.fetchWithTimeout(`${SAAVN_BASE}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
       if (!res.ok) {
         res = await this.fetchWithTimeout(`${SAAVN_FALLBACK}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
+      }
+      if (!res.ok) {
+        res = await this.fetchWithTimeout(`${SAAVN_MIRROR3}/search/songs?query=hindi%20top%20hits&limit=30`, 4000);
       }
       if (res.ok) {
         const json = await res.json();
@@ -284,40 +398,121 @@ class MusicApiService {
       streamUrl = streamUrl.replace('http://', 'https://');
     }
 
-    // Pick best image: 500x500 -> 150x150
+    // Pick highest resolution uncompressed artwork: replace 50x50 / 150x150 with 500x500
     let artwork = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=600&q=80';
     if (Array.isArray(raw.image)) {
-      const bestImg = raw.image.find((i: any) => i.quality === '500x500' || i.quality === '150x150') || raw.image[raw.image.length - 1];
+      const bestImg = raw.image.find((i: any) => i.quality === '500x500') || raw.image[raw.image.length - 1];
       artwork = bestImg?.url || bestImg?.link || artwork;
     } else if (typeof raw.image === 'string') {
       artwork = raw.image;
+    }
+
+    // Upgrade resolution on Saavn CDN URLs
+    if (artwork.includes('-150x150.jpg') || artwork.includes('-50x50.jpg')) {
+      artwork = artwork.replace('-150x150.jpg', '-500x500.jpg').replace('-50x50.jpg', '-500x500.jpg');
     }
 
     if (artwork.startsWith('http://')) {
       artwork = artwork.replace('http://', 'https://');
     }
 
-    // Artist name extraction
-    let artistName = 'Various Artists';
-    if (raw.primaryArtists) {
-      artistName = typeof raw.primaryArtists === 'string' ? raw.primaryArtists : raw.primaryArtists.map((a: any) => a.name).join(', ');
-    } else if (raw.artist) {
-      artistName = raw.artist;
-    } else if (raw.singers) {
-      artistName = raw.singers;
+    // Artist name extraction with comprehensive multi-source parsing
+    let artistName = '';
+
+    // 1. Direct string fields
+    if (typeof raw.primaryArtists === 'string' && raw.primaryArtists.trim()) {
+      artistName = raw.primaryArtists.trim();
+    } else if (Array.isArray(raw.primaryArtists) && raw.primaryArtists.length > 0) {
+      artistName = raw.primaryArtists
+        .map((a: any) => (typeof a === 'string' ? a : a.name))
+        .filter(Boolean)
+        .join(', ');
     }
+
+    // 2. Structured artists object (e.g. raw.artists.primary / raw.artists.all)
+    if (!artistName && raw.artists) {
+      if (Array.isArray(raw.artists.primary) && raw.artists.primary.length > 0) {
+        artistName = raw.artists.primary
+          .map((a: any) => (typeof a === 'string' ? a : a.name))
+          .filter(Boolean)
+          .join(', ');
+      } else if (Array.isArray(raw.artists.all) && raw.artists.all.length > 0) {
+        artistName = raw.artists.all
+          .map((a: any) => (typeof a === 'string' ? a : a.name))
+          .filter(Boolean)
+          .join(', ');
+      }
+    }
+
+    // 3. Fallbacks: singers, artist, more_info
+    if (!artistName && typeof raw.singers === 'string' && raw.singers.trim()) {
+      artistName = raw.singers.trim();
+    } else if (!artistName && typeof raw.artist === 'string' && raw.artist.trim()) {
+      artistName = raw.artist.trim();
+    } else if (!artistName && raw.more_info) {
+      if (Array.isArray(raw.more_info.artistMap?.primary_artists) && raw.more_info.artistMap.primary_artists.length > 0) {
+        artistName = raw.more_info.artistMap.primary_artists.map((a: any) => a.name).join(', ');
+      } else if (raw.more_info.singers) {
+        artistName = typeof raw.more_info.singers === 'string' ? raw.more_info.singers : raw.more_info.singers.join(', ');
+      }
+    }
+
+    if (!artistName) {
+      artistName = 'Various Artists';
+    }
+
+    // Video fallback derivation via Render backend for JioSaavn / local tracks
+    const fallbackRenderVideo = `${RENDER_BACKEND_URL}/api/v1/tracks/search-video?query=${encodeURIComponent(
+      (raw.name || raw.title || '') + ' ' + (artistName || '')
+    )}`;
 
     return {
       id: String(raw.id || raw.title),
-      title: raw.name || raw.title || 'Untitled Track',
-      artist: artistName,
-      album: typeof raw.album === 'object' ? raw.album?.name || 'Single' : raw.album || 'Single',
+      title: decodeHtmlEntities(raw.name || raw.title || 'Untitled Track'),
+      artist: decodeHtmlEntities(artistName),
+      album: decodeHtmlEntities(typeof raw.album === 'object' ? raw.album?.name || 'Single' : raw.album || 'Single'),
       artworkUrl: artwork,
       mediaUrl: streamUrl,
+      lowQualityVideoUrl: `${fallbackRenderVideo}&quality=low`,
+      highQualityVideoUrl: `${fallbackRenderVideo}&quality=high`,
+      renderStreamUrl: fallbackRenderVideo,
       duration: Number(raw.duration) || 210,
       type: 'audio',
       views: Number(raw.playCount) || 75000,
       likes: Number(raw.favoriteCount) || 5400,
+      isLiked: false,
+    };
+  }
+
+  private formatRenderTrack(raw: any): Track | null {
+    if (!raw || !raw.title) return null;
+
+    const sourceTrackId = raw.sourceTrackId || raw.id?.replace(/^yt_/, '') || '';
+    const artistNames = Array.isArray(raw.artists)
+      ? raw.artists.map((a: any) => (typeof a === 'string' ? a : a.name)).filter(Boolean).join(', ')
+      : typeof raw.artists === 'string'
+      ? raw.artists
+      : raw.artist || 'Various Artists';
+
+    const artwork = raw.artworkUrl || (sourceTrackId ? `https://i.ytimg.com/vi/${sourceTrackId}/hqdefault.jpg` : '');
+
+    const baseRenderStream = `${RENDER_BACKEND_URL}/api/v1/tracks/${sourceTrackId}/stream`;
+
+    return {
+      id: raw.id || `yt_${sourceTrackId}`,
+      title: decodeHtmlEntities(raw.title),
+      artist: decodeHtmlEntities(artistNames || 'Various Artists'),
+      artistId: raw.artists?.[0]?.id,
+      album: decodeHtmlEntities(typeof raw.album === 'object' ? raw.album?.title || 'Single' : raw.album || 'Single'),
+      artworkUrl: artwork,
+      mediaUrl: baseRenderStream,
+      lowQualityVideoUrl: `${baseRenderStream}?quality=low&video=true`,
+      highQualityVideoUrl: `${baseRenderStream}?quality=high&video=true`,
+      renderStreamUrl: baseRenderStream,
+      duration: raw.durationMs ? Math.floor(raw.durationMs / 1000) : Number(raw.duration) || 210,
+      type: 'audio',
+      views: 85000,
+      likes: 6400,
       isLiked: false,
     };
   }

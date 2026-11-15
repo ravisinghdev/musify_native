@@ -1,4 +1,6 @@
 export type RootStackParamList = {
+  IntroTour: undefined;
+  AuthScreen: undefined;
   MainTabs: undefined;
   AuthStack: undefined;
   FullPlayerModal: undefined;
@@ -7,6 +9,7 @@ export type RootStackParamList = {
   ArtistProfile: { artistId: string };
   PlaylistDetails: { playlistId: string };
   LyricsScreen: { trackId: string };
+  EqualizerModal: undefined;
   QueueModal: undefined;
   UserProfile: undefined;
   EditProfile: undefined;

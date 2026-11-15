@@ -1,9 +1,9 @@
 import React from 'react';
+import { StyleSheet, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Home, Search, Library, Settings } from 'lucide-react-native';
 
-import { useThemeStore } from '../store/useThemeStore';
+import { CustomGlassTabBar } from './CustomGlassTabBar';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
 import { LibraryScreen } from '../screens/library/LibraryScreen';
@@ -13,66 +13,27 @@ import { VideoPlayerScreen } from '../screens/player/VideoPlayerScreen';
 import { PremiumSubscriptionScreen } from '../screens/hubs/PremiumSubscriptionScreen';
 import { NotificationCenterScreen } from '../screens/hubs/NotificationCenterScreen';
 import { DetailScreen } from '../screens/details/DetailScreen';
+import { EqualizerModal } from '../screens/player/EqualizerModal';
+import { IntroTourScreen } from '../screens/auth/IntroTourScreen';
 import { AuthScreen } from '../screens/auth/AuthScreen';
+import { UserProfileScreen } from '../screens/profile/UserProfileScreen';
 import { RootStackParamList, MainTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const MainTabNavigator = () => {
-  const { colors } = useThemeStore();
-
   return (
     <Tab.Navigator
+      tabBar={(props) => <CustomGlassTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.surfaceBorder,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-        },
       }}
     >
-      <Tab.Screen
-        name="HomeTab"
-        component={HomeScreen}
-        options={{
-          tabBarLabel: 'Home',
-          tabBarIcon: ({ color, size }) => <Home size={size} color={color} />,
-        }}
-      />
-      <Tab.Screen
-        name="SearchTab"
-        component={SearchScreen}
-        options={{
-          tabBarLabel: 'Search',
-          tabBarIcon: ({ color, size }) => <Search size={size} color={color} />,
-        }}
-      />
-      <Tab.Screen
-        name="LibraryTab"
-        component={LibraryScreen}
-        options={{
-          tabBarLabel: 'Library',
-          tabBarIcon: ({ color, size }) => <Library size={size} color={color} />,
-        }}
-      />
-      <Tab.Screen
-        name="SettingsTab"
-        component={SettingsScreen}
-        options={{
-          tabBarLabel: 'Settings',
-          tabBarIcon: ({ color, size }) => <Settings size={size} color={color} />,
-        }}
-      />
+      <Tab.Screen name="HomeTab" component={HomeScreen} />
+      <Tab.Screen name="SearchTab" component={SearchScreen} />
+      <Tab.Screen name="LibraryTab" component={LibraryScreen} />
+      <Tab.Screen name="SettingsTab" component={SettingsScreen} />
     </Tab.Navigator>
   );
 };
@@ -80,58 +41,112 @@ const MainTabNavigator = () => {
 export const AppNavigator = () => {
   return (
     <Stack.Navigator
+      initialRouteName="IntroTour"
       screenOptions={{
         headerShown: false,
+        animation: 'slide_from_right',
+        animationDuration: 180,
       }}
     >
-      <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-      
-      {/* Media Playback Modals & Screens */}
+      <Stack.Screen
+        name="IntroTour"
+        component={IntroTourScreen}
+        options={{
+          animation: 'fade',
+          animationDuration: 200,
+        }}
+      />
+      <Stack.Screen
+        name="AuthScreen"
+        component={AuthScreen}
+        options={{
+          animation: 'slide_from_bottom',
+          animationDuration: 200,
+        }}
+      />
+      <Stack.Screen
+        name="MainTabs"
+        component={MainTabNavigator}
+        options={{
+          animation: 'fade',
+          animationDuration: 180,
+        }}
+      />
       <Stack.Screen
         name="FullPlayerModal"
         component={FullPlayerModal}
         options={{
           presentation: 'modal',
           animation: 'slide_from_bottom',
+          animationDuration: 220,
+        }}
+      />
+      <Stack.Screen
+        name="EqualizerModal"
+        component={EqualizerModal}
+        options={{
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+          animationDuration: 200,
         }}
       />
       <Stack.Screen
         name="VideoPlayerScreen"
         component={VideoPlayerScreen}
         options={{
+          presentation: 'fullScreenModal',
           animation: 'fade',
+          animationDuration: 180,
         }}
       />
-
-      {/* Hubs & Centers */}
-      <Stack.Screen name="PremiumSubscription" component={PremiumSubscriptionScreen} />
-      <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
-
-      {/* Detail Pages */}
-      <Stack.Screen name="PlaylistDetails">
-        {() => <DetailScreen type="playlist" />}
-      </Stack.Screen>
-      <Stack.Screen name="ArtistProfile">
-        {() => <DetailScreen type="artist" />}
-      </Stack.Screen>
-      <Stack.Screen name="AlbumDetails">
-        {() => <DetailScreen type="album" />}
-      </Stack.Screen>
-      <Stack.Screen name="UserProfile">
-        {() => <DetailScreen type="profile" />}
-      </Stack.Screen>
-      <Stack.Screen name="AudioQualitySettings">
-        {() => <DetailScreen type="audio-quality" />}
-      </Stack.Screen>
-      <Stack.Screen name="StorageCacheSettings">
-        {() => <DetailScreen type="storage" />}
-      </Stack.Screen>
-
-      {/* Auth Flow */}
-      <Stack.Screen name="AuthStack">
-        {() => <AuthScreen mode="login" />}
-      </Stack.Screen>
+      <Stack.Screen
+        name="PlaylistDetails"
+        children={() => <DetailScreen type="playlist" />}
+        options={{ animation: 'slide_from_right', animationDuration: 180 }}
+      />
+      <Stack.Screen
+        name="ArtistProfile"
+        children={() => <DetailScreen type="artist" />}
+        options={{ animation: 'slide_from_right', animationDuration: 180 }}
+      />
+      <Stack.Screen
+        name="AlbumDetails"
+        children={() => <DetailScreen type="album" />}
+        options={{ animation: 'slide_from_right', animationDuration: 180 }}
+      />
+      <Stack.Screen
+        name="UserProfile"
+        component={UserProfileScreen}
+        options={{ animation: 'slide_from_right', animationDuration: 180 }}
+      />
+      <Stack.Screen
+        name="AudioQualitySettings"
+        children={() => <DetailScreen type="audio-quality" />}
+        options={{ animation: 'slide_from_right', animationDuration: 180 }}
+      />
+      <Stack.Screen
+        name="StorageCacheSettings"
+        children={() => <DetailScreen type="storage" />}
+        options={{ animation: 'slide_from_right', animationDuration: 180 }}
+      />
+      <Stack.Screen
+        name="PremiumSubscription"
+        component={PremiumSubscriptionScreen}
+        options={{
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+          animationDuration: 200,
+        }}
+      />
+      <Stack.Screen
+        name="NotificationCenter"
+        component={NotificationCenterScreen}
+        options={{
+          presentation: 'modal',
+          animation: 'slide_from_right',
+          animationDuration: 180,
+        }}
+      />
     </Stack.Navigator>
   );
 };
-

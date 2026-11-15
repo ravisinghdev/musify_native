@@ -1,139 +1,426 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Palette, Volume2, HardDrive, ShieldCheck, User, ChevronRight, Sparkles } from 'lucide-react-native';
-import { AppShell } from '../../components/layout/AppShell';
-import { useThemeStore } from '../../store/useThemeStore';
-import { ACCENT_PALETTES, AccentColor } from '../../constants/theme';
-import { RootStackParamList } from '../../navigation/types';
+import React, { useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Switch,
+  Platform,
+} from "react-native";
+import {
+  Sliders,
+  Volume2,
+  HardDrive,
+  Bell,
+  Lock,
+  ChevronRight,
+  ShieldCheck,
+  Headphones,
+  Zap,
+  Sparkles,
+  Database,
+  User,
+  LogOut,
+} from "lucide-react-native";
+import { BlurView } from "expo-blur";
+import { AppShell } from "../../components/layout/AppShell";
+import { useThemeStore } from "../../store/useThemeStore";
+import { ACCENT_PALETTES, AccentColor } from "../../constants/theme";
+import {
+  cloudService,
+  UserProfile,
+} from "../../services/supabase/cloudService";
+import { useNavigation } from "@react-navigation/native";
+import { hapticFeedback } from "../../utils/haptics";
 
 export const SettingsScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
   const { colors, accent, setAccent } = useThemeStore();
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [losslessStreaming, setLosslessStreaming] = useState(true);
+  const [spatialAudio, setSpatialAudio] = useState(true);
+  const [gaplessPlayback, setGaplessPlayback] = useState(true);
+  const [aiSuggestions, setAiSuggestions] = useState(true);
 
-  const availableAccents: { key: AccentColor; label: string; hex: string }[] = [
-    { key: 'violet', label: 'Electric Violet', hex: ACCENT_PALETTES.violet.primary },
-    { key: 'emerald', label: 'Emerald Green', hex: ACCENT_PALETTES.emerald.primary },
-    { key: 'cyan', label: 'Neon Cyan', hex: ACCENT_PALETTES.cyan.primary },
-    { key: 'ruby', label: 'Ruby Red', hex: ACCENT_PALETTES.ruby.primary },
-    { key: 'gold', label: 'Solar Gold', hex: ACCENT_PALETTES.gold.primary },
+  React.useEffect(() => {
+    cloudService.getCurrentUser().then(setUserProfile);
+  }, []);
+
+  const handleSignOut = async () => {
+    hapticFeedback.medium();
+    await cloudService.signOut();
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "AuthScreen" }],
+    });
+  };
+
+  const accentKeys: AccentColor[] = [
+    "obsidianGlass",
+    "pearlGlass",
+    "midnightLuxe",
   ];
 
   return (
     <AppShell>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Settings</Text>
-
-        {/* Dynamic Accent Color Switcher */}
-        <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.surfaceBorder }]}>
-          <View style={styles.cardHeader}>
-            <Palette size={20} color={colors.primary} />
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Theme & Mood Accent</Text>
-          </View>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Change your visual aesthetic on the fly. All icons, glows, and playbars will adapt immediately.
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>Settings</Text>
+          <Text style={styles.headerSubtitle}>
+            Personalization, cloud sync & AI
           </Text>
+        </View>
 
-          <View style={styles.colorPillsContainer}>
-            {availableAccents.map((item) => {
-              const isSelected = accent === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  onPress={() => setAccent(item.key)}
-                  style={[
-                    styles.colorPill,
-                    {
-                      borderColor: isSelected ? colors.textPrimary : 'transparent',
-                      borderWidth: isSelected ? 2 : 1,
-                    },
-                  ]}
+        {/* 0. Supabase Cloud Account Card */}
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionHeading}>CLOUD PROFILE & SUPABASE</Text>
+
+          <View style={styles.liquidCard}>
+            <BlurView
+              intensity={75}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.glassWash} />
+
+            <View style={{ padding: 16 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
                 >
-                  <View style={[styles.colorCircle, { backgroundColor: item.hex }]} />
-                  <Text
-                    style={[
-                      styles.colorLabel,
-                      { color: isSelected ? colors.textPrimary : colors.textSecondary, fontWeight: isSelected ? '700' : '400' },
-                    ]}
+                  <View
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: "rgba(0, 210, 255, 0.12)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderWidth: 1,
+                      borderColor: "rgba(0, 210, 255, 0.3)",
+                    }}
                   >
-                    {item.label}
+                    <User size={22} color={colors.primary} />
+                  </View>
+                  <View>
+                    <Text
+                      style={{
+                        fontSize: 16,
+                        fontWeight: "800",
+                        color: "#FFFFFF",
+                      }}
+                    >
+                      {userProfile?.name || "Musify Member"}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: "rgba(255, 255, 255, 0.55)",
+                        marginTop: 2,
+                      }}
+                    >
+                      {userProfile?.email || "Cloud Synced"}
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={handleSignOut}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 14,
+                    backgroundColor: "rgba(255, 255, 255, 0.06)",
+                    borderWidth: 1,
+                    borderColor: "rgba(255, 255, 255, 0.14)",
+                  }}
+                >
+                  <LogOut size={14} color="rgba(255, 255, 255, 0.65)" />
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "700",
+                      color: "rgba(255, 255, 255, 0.75)",
+                    }}
+                  >
+                    Sign Out
                   </Text>
                 </TouchableOpacity>
-              );
-            })}
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: 10,
+                    backgroundColor: "rgba(0, 210, 255, 0.08)",
+                  }}
+                >
+                  <Database size={12} color={colors.primary} />
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      color: colors.primary,
+                      fontWeight: "700",
+                    }}
+                  >
+                    Postgres Cloud Active
+                  </Text>
+                </View>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: 10,
+                    backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  }}
+                >
+                  <Sparkles size={12} color={colors.primaryLight} />
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      color: colors.primaryLight,
+                      fontWeight: "700",
+                    }}
+                  >
+                    AI Assistant Ready
+                  </Text>
+                </View>
+              </View>
+            </View>
           </View>
         </View>
 
-        {/* Premium Upgrade Teaser */}
-        <TouchableOpacity
-          onPress={() => navigation.navigate('PremiumSubscription')}
-          style={[styles.premiumBanner, { borderColor: colors.primary }]}
-        >
-          <View style={styles.premiumRow}>
-            <Sparkles size={24} color={colors.primary} />
-            <View style={styles.premiumMeta}>
-              <Text style={[styles.premiumTitle, { color: colors.textPrimary }]}>MUSIFY Premium</Text>
-              <Text style={[styles.premiumSub, { color: colors.textSecondary }]}>
-                Lossless audio, 4K video, no ads & unlimited downloads.
-              </Text>
+        {/* 1. Accent Color Palette Selector Card */}
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionHeading}>ACCENT COLOR & GLOW</Text>
+
+          <View style={styles.liquidCard}>
+            <BlurView
+              intensity={75}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.glassWash} />
+
+            <View style={styles.palettesGrid}>
+              {accentKeys.map((key) => {
+                const palette = ACCENT_PALETTES[key];
+                const isSelected = accent === key;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    onPress={() => {
+                      hapticFeedback.selection();
+                      setAccent(key);
+                    }}
+                    style={[
+                      styles.paletteOption,
+                      isSelected && [
+                        styles.paletteOptionSelected,
+                        { borderColor: palette.primary, backgroundColor: 'rgba(255, 255, 255, 0.12)' },
+                      ],
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.paletteDot,
+                        {
+                          backgroundColor: palette.primary,
+                          shadowColor: palette.primary,
+                          shadowOpacity: isSelected ? 0.6 : 0.2,
+                          shadowRadius: isSelected ? 8 : 2,
+                          elevation: isSelected ? 4 : 1,
+                        },
+                      ]}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.paletteLabel,
+                          isSelected && { color: '#FFFFFF', fontWeight: '800' },
+                        ]}
+                      >
+                        {palette.label}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          fontSize: 10,
+                          color: 'rgba(255, 255, 255, 0.45)',
+                          marginTop: 2,
+                        }}
+                      >
+                        {palette.sublabel}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-            <ChevronRight size={20} color={colors.primary} />
           </View>
-        </TouchableOpacity>
-
-        {/* Playback & Audio Preferences */}
-        <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.surfaceBorder }]}>
-          <View style={styles.cardHeader}>
-            <Volume2 size={20} color={colors.primary} />
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Audio & Video</Text>
-          </View>
-
-          <TouchableOpacity
-            onPress={() => navigation.navigate('AudioQualitySettings')}
-            style={[styles.settingRow, { borderColor: colors.surfaceBorder }]}
-          >
-            <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Streaming Quality</Text>
-            <View style={styles.settingValueRow}>
-              <Text style={[styles.settingValue, { color: colors.textMuted }]}>Lossless (FLAC)</Text>
-              <ChevronRight size={16} color={colors.textMuted} />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => navigation.navigate('StorageCacheSettings')}
-            style={[styles.settingRow, { borderColor: colors.surfaceBorder }]}
-          >
-            <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Storage & Cache</Text>
-            <View style={styles.settingValueRow}>
-              <Text style={[styles.settingValue, { color: colors.textMuted }]}>1.2 GB cached</Text>
-              <ChevronRight size={16} color={colors.textMuted} />
-            </View>
-          </TouchableOpacity>
         </View>
 
-        {/* Profile & Account */}
-        <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.surfaceBorder }]}>
-          <View style={styles.cardHeader}>
-            <User size={20} color={colors.primary} />
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Account</Text>
+        {/* 2. Audio Fidelity & Spatial Controls Card */}
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionHeading}>AUDIO & FIDELITY</Text>
+
+          <View style={styles.liquidCard}>
+            <BlurView
+              intensity={75}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.glassWash} />
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingIconWrap}>
+                <Headphones size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingTitle}>Lossless 320kbps Audio</Text>
+                <Text style={styles.settingSubtitle}>
+                  Master quality low-latency stream
+                </Text>
+              </View>
+              <Switch
+                value={losslessStreaming}
+                onValueChange={(val) => {
+                  hapticFeedback.light();
+                  setLosslessStreaming(val);
+                }}
+                trackColor={{
+                  false: "rgba(255,255,255,0.2)",
+                  true: colors.primary,
+                }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.rowDivider} />
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingIconWrap}>
+                <Zap size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingTitle}>
+                  Spatial Audio & Dolby Atmos
+                </Text>
+                <Text style={styles.settingSubtitle}>
+                  Virtual 3D immersive surround sound
+                </Text>
+              </View>
+              <Switch
+                value={spatialAudio}
+                onValueChange={(val) => {
+                  hapticFeedback.light();
+                  setSpatialAudio(val);
+                }}
+                trackColor={{
+                  false: "rgba(255,255,255,0.2)",
+                  true: colors.primary,
+                }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.rowDivider} />
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingIconWrap}>
+                <Volume2 size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingTitle}>
+                  Gapless Playback & Crossfade
+                </Text>
+                <Text style={styles.settingSubtitle}>
+                  Smooth 2-second crossfade transitions
+                </Text>
+              </View>
+              <Switch
+                value={gaplessPlayback}
+                onValueChange={(val) => {
+                  hapticFeedback.light();
+                  setGaplessPlayback(val);
+                }}
+                trackColor={{
+                  false: "rgba(255,255,255,0.2)",
+                  true: colors.primary,
+                }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
           </View>
+        </View>
 
-          <TouchableOpacity
-            onPress={() => navigation.navigate('UserProfile')}
-            style={[styles.settingRow, { borderColor: colors.surfaceBorder }]}
-          >
-            <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>View Profile</Text>
-            <ChevronRight size={16} color={colors.textMuted} />
-          </TouchableOpacity>
+        {/* 3. System & Data Preferences */}
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionHeading}>SYSTEM & DATA</Text>
 
-          <TouchableOpacity
-            onPress={() => navigation.navigate('AuthStack')}
-            style={[styles.settingRow, { borderColor: colors.surfaceBorder, borderBottomWidth: 0 }]}
-          >
-            <Text style={[styles.settingLabel, { color: colors.error }]}>Log Out</Text>
-            <ChevronRight size={16} color={colors.textMuted} />
-          </TouchableOpacity>
+          <View style={styles.liquidCard}>
+            <BlurView
+              intensity={75}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.glassWash} />
+
+            <TouchableOpacity style={styles.menuRow} activeOpacity={0.8}>
+              <View style={styles.settingIconWrap}>
+                <HardDrive size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingTitle}>Storage & Cache Manager</Text>
+                <Text style={styles.settingSubtitle}>
+                  Clear cached offline streams & lyrics
+                </Text>
+              </View>
+              <ChevronRight size={18} color="rgba(255, 255, 255, 0.45)" />
+            </TouchableOpacity>
+
+            <View style={styles.rowDivider} />
+
+            <TouchableOpacity style={styles.menuRow} activeOpacity={0.8}>
+              <View style={styles.settingIconWrap}>
+                <ShieldCheck size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingTitle}>Privacy & Policies</Text>
+                <Text style={styles.settingSubtitle}>
+                  Telemetry & offline listening modes
+                </Text>
+              </View>
+              <ChevronRight size={18} color="rgba(255, 255, 255, 0.45)" />
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </AppShell>
@@ -141,100 +428,210 @@ export const SettingsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  // ==========================================
+  // SCROLL CONTAINER
+  // ==========================================
+
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 32,
+    paddingTop: 8,
+    paddingBottom: 170,
   },
+
+  // ==========================================
+  // HEADER
+  // ==========================================
+
+  headerRow: {
+    marginBottom: 20,
+    marginTop: 4,
+  },
+
   headerTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    marginBottom: 20,
+    fontSize: 34,
+    fontWeight: "800",
+    color: "#E8EAF0",
+    letterSpacing: -0.8,
+    marginBottom: 3,
   },
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 18,
-    marginBottom: 20,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 6,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cardSubtitle: {
+
+  headerSubtitle: {
     fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 16,
+    color: "rgba(220,225,235,0.48)",
+    letterSpacing: 0.1,
   },
-  colorPillsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+
+  // ==========================================
+  // SECTIONS
+  // ==========================================
+
+  sectionBlock: {
+    marginBottom: 26,
+  },
+
+  sectionHeading: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1.1,
+    color: "rgba(220,225,235,0.48)",
+    marginBottom: 12,
+    marginLeft: 5,
+    textTransform: "uppercase",
+  },
+
+  // ==========================================
+  // LIQUID GLASS CARD
+  // ==========================================
+
+  liquidCard: {
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.13)",
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "rgba(25,28,34,0.48)",
+
+    shadowColor: "#000000",
+    shadowOffset: {
+      width: 0,
+      height: 12,
+    },
+    shadowOpacity: 0.22,
+    shadowRadius: 22,
+    elevation: 8,
+  },
+
+  glassWash: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255,255,255,0.025)",
+  },
+
+  // ==========================================
+  // COLOR PALETTE GRID
+  // ==========================================
+
+  palettesGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    padding: 14,
     gap: 10,
   },
-  colorPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    gap: 8,
+
+  paletteOption: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.025)",
+
+    gap: 12,
   },
-  colorCircle: {
+
+  paletteOptionSelected: {
+    borderWidth: 1.4,
+    borderColor: "rgba(220,225,235,0.42)",
+    backgroundColor: "rgba(255,255,255,0.075)",
+  },
+
+  paletteDot: {
     width: 14,
     height: 14,
     borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.20)",
   },
-  colorLabel: {
-    fontSize: 13,
-  },
-  premiumBanner: {
-    borderRadius: 16,
-    borderWidth: 1.5,
-    padding: 16,
-    marginBottom: 20,
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
-  },
-  premiumRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  premiumMeta: {
+
+  paletteLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#D9DDE5",
     flex: 1,
   },
-  premiumTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  premiumSub: {
-    fontSize: 12,
-    marginTop: 2,
-  },
+
+  // ==========================================
+  // SETTINGS ROW
+  // ==========================================
+
   settingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 0.5,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    minHeight: 72,
   },
-  settingLabel: {
+
+  // ==========================================
+  // MENU ROW
+  // ==========================================
+
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    minHeight: 72,
+  },
+
+  // ==========================================
+  // SETTINGS ICON
+  // ==========================================
+
+  settingIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+
+    backgroundColor: "rgba(255,255,255,0.045)",
+
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+
+  // ==========================================
+  // SETTINGS TEXT
+  // ==========================================
+
+  settingInfo: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+  },
+
+  settingTitle: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: "700",
+    color: "#E8EAF0",
+    marginBottom: 4,
+    letterSpacing: -0.15,
   },
-  settingValueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+
+  settingSubtitle: {
+    fontSize: 12,
+    color: "rgba(220,225,235,0.46)",
+    lineHeight: 17,
   },
-  settingValue: {
-    fontSize: 13,
+
+  // ==========================================
+  // DIVIDERS
+  // ==========================================
+
+  rowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255,255,255,0.09)",
+    marginLeft: 70,
+    marginRight: 16,
   },
 });
-
