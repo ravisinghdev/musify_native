@@ -215,36 +215,26 @@ class MusicApiService {
 
   /**
    * Resolve direct playable stream URL for a track.
-   * If the track already has a direct CDN URL, returns it immediately.
-   * If it has a Render stream URL or YouTube ID, resolves high-speed 320kbps playback URL.
+   * If the track originates from YouTube, returns the Render stream proxy URL
+   * which streams the exact, unadulterated original YouTube audio bytes directly.
    */
   async resolvePlayableStream(track: Track): Promise<string> {
     if (!track) return '';
 
-    // If mediaUrl is already a direct audio file CDN (.mp4, .m4a, .mp3)
-    if (track.mediaUrl && (track.mediaUrl.includes('saavncdn.com') || track.mediaUrl.includes('apple.com') || track.mediaUrl.includes('audius.co'))) {
-      return track.mediaUrl;
-    }
-
+    // If it's a YouTube track, always stream the authentic YouTube audio stream directly
     const cleanId = (track.id || '').replace(/^yt_/, '');
-
-    // Query Render playback endpoint to resolve direct 320kbps CDN or direct YouTube deciphered audio
-    if (RENDER_BACKEND_URL && cleanId) {
-      try {
-        const res = await this.fetchWithTimeout(`${RENDER_BACKEND_URL}/api/v1/tracks/${cleanId}/playback`, 4500);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.playbackUrl) {
-            return json.playbackUrl;
-          }
-        }
-      } catch (err) {
-        console.warn('Playback resolution error:', err);
+    if (track.id?.startsWith('yt_') || cleanId.length === 11) {
+      if (RENDER_BACKEND_URL && cleanId) {
+        return `${RENDER_BACKEND_URL}/api/v1/tracks/${cleanId}/stream`;
       }
     }
 
-    // Fallback: return stream proxy URL
-    return track.mediaUrl || `${RENDER_BACKEND_URL}/api/v1/tracks/${cleanId}/stream`;
+    // Direct CDN tracks from Saavn or Audius
+    if (track.mediaUrl) {
+      return track.mediaUrl;
+    }
+
+    return `${RENDER_BACKEND_URL}/api/v1/tracks/${cleanId}/stream`;
   }
 
   /**
