@@ -431,6 +431,7 @@ const app = new Elysia()
       id: "mock_curated",
       title: "Musify Spotlight",
       artists: [{ id: "artist_spotlight", name: "Featured" }],
+      source: "youtube",
       sourceTrackId: "jfKfPfyJRdk",
     };
     const suggestions = await aiService.getAISmartQueueSuggestions(mockTrack, [], "smart", 6);

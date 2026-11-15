@@ -37,6 +37,8 @@ export interface Track {
   sourceTrackId: string;
 }
 
+export type TrackData = Track;
+
 export interface TrackSearchResult {
   tracks: Track[];
   nextPageToken?: string;
