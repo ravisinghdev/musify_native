@@ -81,6 +81,10 @@ class YouTubeService {
             const channel = vr.ownerText?.runs?.[0]?.text || vr.longBylineText?.runs?.[0]?.text || 'YouTube Music';
             const durationText = vr.lengthText?.simpleText || '3:30';
             
+            // Check for official badges (Official Artist Channel, Verified)
+            const badges = vr.ownerBadges?.map((b: any) => b?.metadataBadgeRenderer?.style || b?.metadataBadgeRenderer?.tooltip) || [];
+            const isOfficialBadge = badges.some((b: string) => /OFFICIAL|VERIFIED|ARTIST/i.test(b));
+
             // Parse duration "3:45" to seconds
             let durationSeconds = 210;
             if (durationText && durationText.includes(':')) {
@@ -92,6 +96,11 @@ class YouTubeService {
               }
             }
 
+            // Filter out junk loops (e.g. 15 mins loop, 30 mins loop, 1 hour)
+            if (durationSeconds > 600) {
+              continue; // Exclude tracks longer than 10 minutes from song results
+            }
+
             const thumbs = vr.thumbnail?.thumbnails || [];
             const artworkUrl = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`;
 
@@ -100,7 +109,7 @@ class YouTubeService {
                 id: vr.videoId,
                 title,
                 artist: channel,
-                album: 'Official Release',
+                album: isOfficialBadge ? 'Official Artist Channel' : 'Official Release',
                 artworkUrl,
                 mediaUrl: '',
                 duration: durationSeconds,
@@ -114,14 +123,47 @@ class YouTubeService {
         }
 
         if (foundTracks.length > 0) {
-          // Sort to put exact original tracks first, deprioritizing remixes and mashups
-          const sorted = foundTracks.sort((a, b) => {
-            const aRemix = /remix|relight|mashup|sped\s+up|slowed/i.test(a.title);
-            const bRemix = /remix|relight|mashup|sped\s+up|slowed/i.test(b.title);
-            if (aRemix && !bRemix) return 1;
-            if (!aRemix && bRemix) return -1;
-            return 0;
-          });
+          // Precise scoring algorithm to ensure official artist uploads rank #1
+          const queryLower = trimmed.toLowerCase();
+          const queryWords = queryLower.split(/\s+/).filter(w => w.length > 1);
+
+          const scoreTrack = (t: Track): number => {
+            let score = 100;
+            const titleLower = t.title.toLowerCase();
+            const artistLower = t.artist.toLowerCase();
+
+            // 1. Heavy penalty for loops, fan-edits, covers, reactions, status videos
+            if (/loop|mins loop|minutes loop|hour loop/i.test(titleLower)) score -= 1000;
+            if (/dance cover|cover by|reaction|whatsapp status|lyrics status/i.test(titleLower)) score -= 800;
+            if (/editor|edits|lofi|cosmic lofi|slowed|reverb|sped up/i.test(artistLower)) score -= 500;
+            if (/editor|edits|status/i.test(titleLower)) score -= 400;
+
+            // 2. Penalty for remix / mashup unless query specifically asked for it
+            const queryWantsRemix = /remix|mashup/i.test(queryLower);
+            if (!queryWantsRemix && /remix|relight|mashup/i.test(titleLower)) score -= 300;
+
+            // 3. High bonus for Official Artist Channel badge
+            if (t.album === 'Official Artist Channel') score += 500;
+
+            // 4. Strong boost if artist channel name matches the artists in the title or query
+            // e.g. "Hamza Malik" channel when title contains "Hamza Malik" or query is "Alfaaz"
+            const artistInTitle = titleLower.includes(artistLower) && artistLower.length > 3;
+            if (artistInTitle) score += 350;
+
+            for (const word of queryWords) {
+              if (artistLower.includes(word)) score += 150;
+            }
+
+            // 5. Official indicators in title: "Official Video", "Official Audio", "Official Music Video"
+            if (/official (video|audio|music video|lyric video)/i.test(titleLower)) score += 200;
+
+            // 6. Prefer standard song lengths (2 - 5 mins)
+            if (t.duration >= 120 && t.duration <= 330) score += 50;
+
+            return score;
+          };
+
+          const sorted = foundTracks.sort((a, b) => scoreTrack(b) - scoreTrack(a));
 
           this.searchCache.set(key, sorted);
           return sorted;
